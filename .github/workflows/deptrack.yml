@@ -1,0 +1,70 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'  # Use the Node.js version your project requires
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Run Tests
+        run: npm test  # Ensure you have tests defined in package.json
+
+      - name: Run Linting
+        run: npm run lint  # Optional: if you have linting configured
+
+      - name: Run Snyk Test
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_API_TOKEN }}
+        run: npx snyk test  # Runs vulnerability scan
+
+      - name: Monitor Snyk (optional)
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_API_TOKEN }}
+        run: npx snyk monitor  # Posts a snapshot to Snyk dashboard
+
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'  # Only deploy from main branch
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Project
+        run: npm run build  # or your build command
+
+      # If you deploy via Render, you can trigger a deployment using their API or Git integration.
+      # Example: If Render auto-deploys on Git push, this job may be optional.
+      - name: Trigger Render Deployment (optional)
+        run: |
+          curl -X POST "https://api.render.com/deploy/srv_YOUR_SERVICE_ID/deploys" \
+          -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+          -H "Content-Type: application/json" \
+          -d '{"clearCache": true}'

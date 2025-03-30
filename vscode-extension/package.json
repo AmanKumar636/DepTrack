@@ -1,0 +1,25 @@
+{
+  "name": "deptrack-vscode",
+  "publisher": "Aman Kumar",
+  "displayName": "DepTrack VS Code",
+  "description": "Displays dependency scan alerts in VS Code.",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.70.0"
+  },
+  "activationEvents": [
+    "onCommand:deptrack.check"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "deptrack.check",
+        "title": "DepTrack: Run Dependency Scan"
+      }
+    ]
+  },
+  "dependencies": {
+    "node-fetch": "^2.6.7"
+  }
+}
