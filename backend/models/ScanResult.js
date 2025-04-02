@@ -5,9 +5,9 @@ const ScanResultSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now },
   summary: String,
   vulnerabilities: Array,
-  outdated: Array,
-  licenseIssues: Array,
-  snyk: Object
+  outdated: Array,       // For outdated dependencies
+  licenseIssues: Array,  // For license issues
+  snyk: Object           // For Snyk data
 });
 
 module.exports = mongoose.model("ScanResult", ScanResultSchema);
