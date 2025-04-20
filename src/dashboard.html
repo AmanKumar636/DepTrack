@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>DepTrack Dashboard</title>
+  <!-- CSP -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'unsafe-inline' vscode-resource:; style-src 'unsafe-inline';">
+  <style>
+    body { margin:0; font-family:'Segoe UI',sans-serif; display:flex; height:100vh; }
+    #aside {
+      background:#2f3542; color:#fff; padding:1rem; flex-shrink:0;
+      display:flex; flex-direction:column; gap:0.5rem; min-width:200px;
+    }
+    #aside h2 { margin:0 0 .5rem; }
+    #aside button {
+      background:#57606f; border:none; color:#fff;
+      padding:.6rem; border-radius:6px; cursor:pointer;
+    }
+    #content {
+      display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr));
+      gap:1rem; padding:1rem; overflow-y:auto; flex:1;
+      background:#f4f6fa;
+    }
+    .card { background:#fff; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1); }
+    .card header {
+      background:#2f3542; color:#fff; padding:.75rem; font-weight:600;
+    }
+    .card .content { padding:1rem; }
+    table { width:100%; border-collapse:collapse; font-size:.9rem; }
+    th,td { padding:.5rem; border:1px solid #e0e0e0; text-align:left; }
+    canvas { width:100%!important; height:200px!important; }
+  </style>
+</head>
+<body>
+  <aside id="aside">
+    <h2>DepTrack</h2>
+    <button id="refresh">🌐 Refresh</button>
+    <button id="test">✅ Smoke Test</button>
+    <button id="slack">💬 Slack Alert</button>
+    <button id="csv">📄 Export CSV</button>
+    <button id="pdf">📑 Export PDF</button>
+  </aside>
+  <div id="content">
+    <div class="card">
+      <header>Outdated Packages</header>
+      <div class="content">
+        <table id="outdatedTable">
+          <thead><tr><th>Package</th><th>Current</th><th>Latest</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <header>Vulnerabilities</header>
+      <div class="content">
+        <canvas id="vulnChart"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <header>License Distribution</header>
+      <div class="content">
+        <canvas id="licenseChart"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <header>Linting Issues</header>
+      <div class="content">
+        <table id="lintTable">
+          <thead><tr><th>File</th><th>Errors</th><th>Warnings</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="chart.min.js"></script>
+  <script>
+    const vscode = acquireVsCodeApi();
+    document.getElementById('refresh').onclick = () => vscode.postMessage({ command: 'refresh' });
+    document.getElementById('test').onclick    = () => vscode.postMessage({ command: 'smokeTest' });
+    document.getElementById('slack').onclick   = () => vscode.postMessage({ command: 'sendSlack' });
+    document.getElementById('csv').onclick     = () => vscode.postMessage({ command: 'exportCSV' });
+    document.getElementById('pdf').onclick     = () => vscode.postMessage({ command: 'exportPDF' });
+
+    let vulnChart, licenseChart;
+    window.addEventListener('message', e => {
+      const { command, payload } = e.data;
+      if (command === 'updateData') {
+        render(payload);
+      }
+      if (command === 'smokeTestResult') {
+        // NEW: send notify back to extension host instead of alert()
+        vscode.postMessage({ command: 'notify', text: payload });
+      }
+    });
+
+    function init() {
+      licenseChart = new Chart(
+        document.getElementById('licenseChart').getContext('2d'),
+        { type:'doughnut', data:{labels:[],datasets:[{data:[]}]}, options:{responsive:true} }
+      );
+      vulnChart = new Chart(
+        document.getElementById('vulnChart').getContext('2d'),
+        { type:'bar', data:{labels:[],datasets:[{label:'Count',data:[]}]}, options:{responsive:true} }
+      );
+    }
+
+    function render({ outdated, vuln, licenses, lint }) {
+      // outdated table
+      const tb = document.querySelector('#outdatedTable tbody');
+      tb.innerHTML = '';
+      for (const [pkg, i] of Object.entries(outdated || {})) {
+        tb.insertRow().innerHTML = `<td>${pkg}</td><td>${i.current||'–'}</td><td>${i.latest||'–'}</td>`;
+      }
+      // vuln chart
+      const vs = Object.entries(vuln?.vulnerabilities||{}).map(([k,i])=>({k,c:i.severity||0}));
+      vulnChart.data.labels = vs.map(x=>x.k);
+      vulnChart.data.datasets[0].data = vs.map(x=>x.c);
+      vulnChart.update();
+      // licenses chart
+      licenseChart.data.labels = (licenses||[]).map(x=>x.license);
+      licenseChart.data.datasets[0].data = (licenses||[]).map(x=>x.count);
+      licenseChart.update();
+      // lint table
+      const sum = {};
+      (lint||[]).forEach(it => {
+        const f = it.filePath || it.file || '';
+        sum[f] = sum[f] || { e:0, w:0 };
+        (it.messages||[]).forEach(m => m.severity===2 ? sum[f].e++ : sum[f].w++);
+      });
+      const lt = document.querySelector('#lintTable tbody');
+      lt.innerHTML = '';
+      for (const [f,c] of Object.entries(sum)) {
+        lt.insertRow().innerHTML = `<td>${f}</td><td>${c.e}</td><td>${c.w}</td>`;
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

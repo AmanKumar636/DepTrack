@@ -1,0 +1,7 @@
+# exclude everything except dist, package.json, dashboard.html, and README
+**
+!dist/**
+!package.json
+!README.md
+!LICENSE*
+!CHANGELOG.md

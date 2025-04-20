@@ -1,0 +1,54 @@
+{
+  "name": "deptrack",
+  "displayName": "DepTrack",
+  "description": "Dependency & Security Tracker",
+  "version": "0.0.1",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "ncc build src/extension.js -o dist -e vscode && powershell -NoProfile -Command \"(Get-Content 'dist/index.js') | Where-Object { $_ -notmatch 'sourceMappingURL' } | Out-File 'dist/index.js' -Encoding utf8 -Force; Copy-Item 'src/dashboard.html' -Destination 'dist/dashboard.html' -Force; Copy-Item 'node_modules/chart.js/dist/chart.umd.js' -Destination 'dist/chart.min.js' -Force\"",
+    "watch:build": "chokidar \"src/**/*\" -c \"npm run build\"",
+    "lint": "eslint ."
+  },
+  "engines": {
+    "vscode": "^1.88.0"
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:deptrack.openDashboard"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "deptrack.openDashboard",
+        "title": "DepTrack: Open Dashboard"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "DepTrack Configuration",
+      "properties": {
+        "deptrack.slackWebhookUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Incoming Webhook URL to send Slack alerts"
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@slack/webhook": "^6.0.0",
+    "build": "^0.1.4",
+    "chart.js": "^4.4.9",
+    "license-checker": "^25.0.1",
+    "npm": "^10.9.2",
+    "pdfkit": "^0.13.0",
+    "run": "^1.5.0",
+    "snyk": "^1.1296.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.25.0",
+    "@vercel/ncc": "^0.34.0",
+    "chokidar-cli": "^3.0.0",
+    "eslint": "^9.25.0"
+  }
+}

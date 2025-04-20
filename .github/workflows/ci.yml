@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run ESLint
+        run: npx eslint .
+
+      - name: Snyk Test
+        run: npx snyk test --severity-threshold=high
+
+      - name: License Checker
+        run: npx license-checker --json > licenses.json
+
+      - name: Upload licenses
+        uses: actions/upload-artifact@v3
+        with:
+          name: licenses
+          path: licenses.json
