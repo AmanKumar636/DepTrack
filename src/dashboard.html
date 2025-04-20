@@ -1,49 +1,72 @@
+<!-- dist/dashboard.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <title>DepTrack Dashboard</title>
-  <!-- CSP -->
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'none'; script-src 'unsafe-inline' vscode-resource:; style-src 'unsafe-inline';">
   <style>
-    body { margin:0; font-family:'Segoe UI',sans-serif; display:flex; height:100vh; }
+    body { margin:0; font-family:'Segoe UI',sans-serif; display:flex; height:100vh; background:#f0f2f5; }
     #aside {
-      background:#2f3542; color:#fff; padding:1rem; flex-shrink:0;
-      display:flex; flex-direction:column; gap:0.5rem; min-width:200px;
+      background:#1e272e; color:#fff; padding:1rem; min-width:220px;
+      display:flex; flex-direction:column; gap:.5rem;
     }
-    #aside h2 { margin:0 0 .5rem; }
+    #aside h2 { margin:0 0 .5rem; font-size:1.25rem; text-align:center; }
     #aside button {
-      background:#57606f; border:none; color:#fff;
-      padding:.6rem; border-radius:6px; cursor:pointer;
+      background:#57606f; border:none; color:#fff; padding:.75rem;
+      border-radius:6px; cursor:pointer; transition:background .2s;
     }
+    #aside button:hover { background:#70a1ff; }
     #content {
+      flex:1; padding:1rem; overflow-y:auto;
       display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr));
-      gap:1rem; padding:1rem; overflow-y:auto; flex:1;
-      background:#f4f6fa;
+      gap:1rem;
     }
-    .card { background:#fff; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1); }
+    .card {
+      background:#fff; border-radius:12px;
+      box-shadow:0 2px 8px rgba(0,0,0,.1);
+      transition:transform .2s,box-shadow .2s;
+      display:flex; flex-direction:column;
+    }
+    .card:hover {
+      transform:translateY(-4px);
+      box-shadow:0 4px 12px rgba(0,0,0,.15);
+    }
     .card header {
-      background:#2f3542; color:#fff; padding:.75rem; font-weight:600;
+      background:linear-gradient(to right,#3742fa,#70a1ff);
+      color:#fff; padding:.85rem 1rem; font-size:1.05rem;
+      border-top-left-radius:12px; border-top-right-radius:12px;
     }
-    .card .content { padding:1rem; }
+    .card .content {
+      padding:1rem; flex:1; overflow-y:auto; max-height:400px;
+    }
     table { width:100%; border-collapse:collapse; font-size:.9rem; }
     th,td { padding:.5rem; border:1px solid #e0e0e0; text-align:left; }
-    canvas { width:100%!important; height:200px!important; }
+    .toast {
+      position:fixed; bottom:1rem; right:1rem; padding:.75rem 1.25rem;
+      background:#2ed573; color:#fff; border-radius:8px;
+      box-shadow:0 2px 8px rgba(0,0,0,.2);
+      animation:fadeInOut 3s forwards; z-index:999;
+    }
+    @keyframes fadeInOut {
+      0%{opacity:0;transform:translateY(20px);}10%{opacity:1;transform:translateY(0);}
+      90%{opacity:1;}100%{opacity:0;transform:translateY(20px);}
+    }
+    .lint-card, .vuln-card, .license-card, .suggestions-card { grid-column: span 2; }
   </style>
 </head>
 <body>
   <aside id="aside">
     <h2>DepTrack</h2>
     <button id="refresh">🌐 Refresh</button>
-    <button id="test">✅ Smoke Test</button>
-    <button id="slack">💬 Slack Alert</button>
+    <button id="health">⚙️ Health Check</button>
+    <button id="email">✉️ Email Alert</button>
     <button id="csv">📄 Export CSV</button>
     <button id="pdf">📑 Export PDF</button>
   </aside>
   <div id="content">
-    <div class="card">
-      <header>Outdated Packages</header>
+    <div class="card"><header>Outdated Packages</header>
       <div class="content">
         <table id="outdatedTable">
           <thead><tr><th>Package</th><th>Current</th><th>Latest</th></tr></thead>
@@ -51,20 +74,26 @@
         </table>
       </div>
     </div>
-    <div class="card">
-      <header>Vulnerabilities</header>
+
+    <div class="card vuln-card"><header>Vulnerabilities</header>
       <div class="content">
-        <canvas id="vulnChart"></canvas>
+        <table id="vulnDetailsTable">
+          <thead><tr><th>Package</th><th>Severity</th><th>Title</th></tr></thead>
+          <tbody></tbody>
+        </table>
       </div>
     </div>
-    <div class="card">
-      <header>License Distribution</header>
+
+    <div class="card license-card"><header>License Issues</header>
       <div class="content">
-        <canvas id="licenseChart"></canvas>
+        <table id="licenseTable">
+          <thead><tr><th>Package</th><th>License</th></tr></thead>
+          <tbody></tbody>
+        </table>
       </div>
     </div>
-    <div class="card">
-      <header>Linting Issues</header>
+
+    <div class="card lint-card"><header>Linting Issues</header>
       <div class="content">
         <table id="lintTable">
           <thead><tr><th>File</th><th>Errors</th><th>Warnings</th></tr></thead>
@@ -72,71 +101,99 @@
         </table>
       </div>
     </div>
+
+    <div class="card suggestions-card"><header>Fix Suggestions</header>
+      <div class="content">
+        <table id="suggestionsTable">
+          <thead><tr><th>Category</th><th>Suggestion</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
-  <script src="chart.min.js"></script>
   <script>
     const vscode = acquireVsCodeApi();
-    document.getElementById('refresh').onclick = () => vscode.postMessage({ command: 'refresh' });
-    document.getElementById('test').onclick    = () => vscode.postMessage({ command: 'smokeTest' });
-    document.getElementById('slack').onclick   = () => vscode.postMessage({ command: 'sendSlack' });
-    document.getElementById('csv').onclick     = () => vscode.postMessage({ command: 'exportCSV' });
-    document.getElementById('pdf').onclick     = () => vscode.postMessage({ command: 'exportPDF' });
+    document.getElementById('refresh').onclick = () => vscode.postMessage({command:'refresh'});
+    document.getElementById('health').onclick  = () => vscode.postMessage({command:'healthCheck'});
+    document.getElementById('email').onclick  = () => vscode.postMessage({command:'sendEmail'});
+    document.getElementById('csv').onclick    = () => vscode.postMessage({command:'exportCSV'});
+    document.getElementById('pdf').onclick    = () => vscode.postMessage({command:'exportPDF'});
 
-    let vulnChart, licenseChart;
     window.addEventListener('message', e => {
-      const { command, payload } = e.data;
-      if (command === 'updateData') {
-        render(payload);
-      }
-      if (command === 'smokeTestResult') {
-        // NEW: send notify back to extension host instead of alert()
-        vscode.postMessage({ command: 'notify', text: payload });
+      if (e.data.command === 'updateData') {
+        const { outdated, vuln, licenseIssues, rawLint, suggestions } = e.data.payload;
+        renderOutdated(outdated);
+        renderVulnDetails(vuln);
+        renderLicenseIssues(licenseIssues);
+        renderLint(rawLint);
+        renderSuggestions(suggestions);
+        showToast('✅ Data refreshed');
       }
     });
 
-    function init() {
-      licenseChart = new Chart(
-        document.getElementById('licenseChart').getContext('2d'),
-        { type:'doughnut', data:{labels:[],datasets:[{data:[]}]}, options:{responsive:true} }
-      );
-      vulnChart = new Chart(
-        document.getElementById('vulnChart').getContext('2d'),
-        { type:'bar', data:{labels:[],datasets:[{label:'Count',data:[]}]}, options:{responsive:true} }
-      );
-    }
-
-    function render({ outdated, vuln, licenses, lint }) {
-      // outdated table
+    function renderOutdated(out) {
       const tb = document.querySelector('#outdatedTable tbody');
       tb.innerHTML = '';
-      for (const [pkg, i] of Object.entries(outdated || {})) {
-        tb.insertRow().innerHTML = `<td>${pkg}</td><td>${i.current||'–'}</td><td>${i.latest||'–'}</td>`;
-      }
-      // vuln chart
-      const vs = Object.entries(vuln?.vulnerabilities||{}).map(([k,i])=>({k,c:i.severity||0}));
-      vulnChart.data.labels = vs.map(x=>x.k);
-      vulnChart.data.datasets[0].data = vs.map(x=>x.c);
-      vulnChart.update();
-      // licenses chart
-      licenseChart.data.labels = (licenses||[]).map(x=>x.license);
-      licenseChart.data.datasets[0].data = (licenses||[]).map(x=>x.count);
-      licenseChart.update();
-      // lint table
-      const sum = {};
-      (lint||[]).forEach(it => {
-        const f = it.filePath || it.file || '';
-        sum[f] = sum[f] || { e:0, w:0 };
-        (it.messages||[]).forEach(m => m.severity===2 ? sum[f].e++ : sum[f].w++);
+      Object.entries(out||{}).forEach(([p,i])=>{
+        const r = tb.insertRow();
+        r.innerHTML = `<td>${p}</td><td>${i.current||'–'}</td><td>${i.latest||'–'}</td>`;
       });
-      const lt = document.querySelector('#lintTable tbody');
-      lt.innerHTML = '';
-      for (const [f,c] of Object.entries(sum)) {
-        lt.insertRow().innerHTML = `<td>${f}</td><td>${c.e}</td><td>${c.w}</td>`;
-      }
     }
 
-    init();
+    function renderVulnDetails(v) {
+      const tb = document.querySelector('#vulnDetailsTable tbody');
+      tb.innerHTML = '';
+      Object.entries(v||{}).forEach(([p,info])=>{
+        const r = tb.insertRow();
+        r.insertCell().textContent = p;
+        r.insertCell().textContent = info.severity;
+        r.insertCell().textContent = info.title || '';
+      });
+    }
+
+    function renderLicenseIssues(list) {
+      const tb = document.querySelector('#licenseTable tbody');
+      tb.innerHTML = '';
+      (list||[]).forEach(x=>{
+        const r = tb.insertRow();
+        r.insertCell().textContent = x.name;
+        r.insertCell().textContent = x.licenses;
+      });
+    }
+
+    function renderLint(lint) {
+      const arr = Array.isArray(lint) ? lint : [];
+      const sum = {};
+      arr.forEach(issue=>{
+        const f = issue.filePath||issue.file;
+        sum[f] = sum[f]||{e:0,w:0};
+        (issue.messages||[]).forEach(m=> m.severity===2? sum[f].e++ : sum[f].w++);
+      });
+      const tb = document.querySelector('#lintTable tbody');
+      tb.innerHTML = '';
+      Object.entries(sum).forEach(([f,c])=>{
+        const r = tb.insertRow();
+        r.innerHTML = `<td>${f}</td><td>${c.e}</td><td>${c.w}</td>`;
+      });
+    }
+
+    function renderSuggestions(sugg) {
+      const tb = document.querySelector('#suggestionsTable tbody');
+      tb.innerHTML = '';
+      (sugg||[]).forEach(x=>{
+        const r = tb.insertRow();
+        r.insertCell().textContent = x.category;
+        r.insertCell().textContent = x.suggestion;
+      });
+    }
+
+    function showToast(msg) {
+      const t = document.createElement('div');
+      t.className = 'toast'; t.textContent = msg;
+      document.body.appendChild(t);
+      setTimeout(()=>t.remove(),3000);
+    }
   </script>
 </body>
 </html>

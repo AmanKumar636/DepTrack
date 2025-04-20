@@ -1,200 +1,208 @@
-const vscode = require('vscode');
-const { exec } = require('child_process');
-const path = require('path');
-const fs = require('fs');
-const { IncomingWebhook } = require('@slack/webhook');
+// src/extension.js
+const vscode      = require('vscode');
+const { exec }    = require('child_process');
+const path        = require('path');
+const fs          = require('fs');
+const nodemailer  = require('nodemailer');
 const PDFDocument = require('pdfkit');
 
-let panel;
-let interval;
-let latestPayload = null;
+let panel, interval, latestPayload = null;
 
 function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand('deptrack.openDashboard', () => {
       if (!panel) {
         panel = vscode.window.createWebviewPanel(
-          'deptrackDashboard',
-          'DepTrack Dashboard',
+          'deptrackDashboard','DepTrack Dashboard',
           vscode.ViewColumn.One,
-          {
-            enableScripts: true,
-            localResourceRoots: [
-              vscode.Uri.file(path.join(context.extensionPath, 'dist'))
-            ]
-          }
+          { enableScripts:true, localResourceRoots:[
+              vscode.Uri.file(path.join(context.extensionPath,'dist'))
+            ]}
         );
-        panel.webview.html = getWebviewContent(context, panel);
-
+        panel.webview.html = fs.readFileSync(
+          path.join(context.extensionPath,'dist','dashboard.html'),'utf8'
+        );
         panel.webview.onDidReceiveMessage(msg => {
-          switch (msg.command) {
-            case 'refresh':
-              runAllChecks(context);
-              break;
-
-            case 'smokeTest':
-              panel.webview.postMessage({
-                command: 'smokeTestResult',
-                payload: `VS Code ${vscode.version}`
-              });
-              break;
-
-            case 'exportCSV':
-              exportCsv(context);
-              break;
-
-            case 'exportPDF':
-              exportPdf(context);
-              break;
-
-            case 'sendSlack':
-              sendSlackNotification(context);
-              break;
-
-            case 'notify':
-              // NEW: show notifications instead of alert()
-              vscode.window.showInformationMessage(msg.text);
-              break;
-          }
+          if (msg.command === 'refresh')     runAllChecks();
+          if (msg.command === 'healthCheck') runHealthCheck();
+          if (msg.command === 'sendEmail')   sendEmailNotification();
+          if (msg.command === 'exportCSV')   exportCsv();
+          if (msg.command === 'exportPDF')   exportPdf();
         });
-
-        panel.onDidDispose(() => panel = undefined);
-      } else {
-        panel.reveal(vscode.ViewColumn.One);
       }
-
-      runAllChecks(context);
+      panel.reveal();
+      runAllChecks();
+      interval = setInterval(runAllChecks, 5*60*1000);
     })
   );
-
-  // every 5 minutes
-  interval = setInterval(() => runAllChecks(context), 5 * 60 * 1000);
-  context.subscriptions.push({ dispose: () => clearInterval(interval) });
-
-  // on save
-  context.subscriptions.push(
-    vscode.workspace.onDidSaveTextDocument(() => runAllChecks(context))
-  );
 }
 
-async function runAllChecks(context) {
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders?.length) {
-    return vscode.window.showErrorMessage('DepTrack: open a folder to monitor.');
-  }
-  const ws = folders[0].uri.fsPath;
+async function runAllChecks() {
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!ws) return vscode.window.showErrorMessage('Open a folder first');
 
-  const [outdated, vuln, rawLicenses, lint] = await Promise.all([
+  // 1) fetch data
+  const [outdated, snykRes, rawLint] = await Promise.all([
     execJson('npm outdated --json', ws),
-    execJson('snyk test --json', ws),
-    execJson('npx license-checker --json', ws),
-    execJson('npx eslint . -f json', ws),
+    execJson('snyk test --json',      ws),
+    execJson('npx eslint . -f json',  ws),
   ]);
 
-  const licenses = processLicenses(rawLicenses);
-  latestPayload = { outdated, vuln, licenses, lint };
+  // 2) extract vulnerabilities
+  const vulnerabilities = snykRes.vulnerabilities || {};
 
-  panel?.webview.postMessage({ command: 'updateData', payload: latestPayload });
+  // 3) extract license issues robustly
+  let rawLic = [];
+  if (Array.isArray(snykRes.licensesPolicy)) {
+    rawLic = snykRes.licensesPolicy;
+  } else if (Array.isArray(snykRes.licensesPolicy?.invalidLicenses)) {
+    rawLic = snykRes.licensesPolicy.invalidLicenses;
+  }
+  const licenseIssues = rawLic.map(p => ({
+    name:     p.packageName,
+    licenses: (p.licenses || []).join(', ')
+  }));
 
-  const vulnCount = Object.keys(vuln?.vulnerabilities || {}).length;
-  if (vulnCount > 0) {
-    await sendSlackNotification(context, `🚨 ${vulnCount} vulnerabilities found.`);
+  // 4) build suggestions
+  const suggestions = makeSuggestions(outdated, vulnerabilities, licenseIssues, rawLint);
+
+  latestPayload = { outdated, vuln: vulnerabilities, licenseIssues, rawLint, suggestions };
+  panel.webview.postMessage({ command:'updateData', payload: latestPayload });
+
+  // auto-email on vulns
+  if (Object.keys(vulnerabilities).length) {
+    sendEmailNotification(
+      'DepTrack Vulnerability Alert',
+      `Detected ${Object.keys(vulnerabilities).length} vulnerabilities.`
+    );
   }
 }
 
-function processLicenses(raw) {
-  const counts = {};
-  for (const info of Object.values(raw || {})) {
-    let lic = info.licenses;
-    if (Array.isArray(lic)) lic = lic.join(', ');
-    counts[lic] = (counts[lic] || 0) + 1;
+async function runHealthCheck() {
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  try {
+    await Promise.all([
+      execCmd('npm outdated --json', ws),
+      execCmd('snyk test --json',    ws),
+      execCmd('npx eslint . -f json', ws),
+    ]);
+    vscode.window.showInformationMessage('DepTrack: All systems go');
+  } catch {
+    vscode.window.showWarningMessage('DepTrack: Issues detected');
   }
-  return Object.entries(counts).map(([license, count]) => ({ license, count }));
 }
 
 function execJson(cmd, cwd) {
-  return new Promise(resolve => {
-    exec(cmd, { cwd }, (err, stdout) => {
-      if (err && !stdout) return resolve({});
-      try { resolve(JSON.parse(stdout)); } catch { resolve({}); }
+  return new Promise(res => {
+    exec(cmd, { cwd }, (err, out) => {
+      if (err && !out)       return res({});
+      try { return res(JSON.parse(out)); }
+      catch { return res({}); }
     });
   });
 }
+function execCmd(cmd, cwd) {
+  return new Promise((res, rej) =>
+    exec(cmd, { cwd }, err => err ? rej(err) : res())
+  );
+}
 
-async function sendSlackNotification(context, text = 'DepTrack alert') {
-  const cfg = vscode.workspace.getConfiguration('deptrack');
-  const url = cfg.get('slackWebhookUrl');
-  if (!url) {
-    return vscode.window.showWarningMessage('DepTrack: Slack webhook not configured.');
+function makeSuggestions(out, vulns, lics, lint) {
+  const s = [];
+  // outdated
+  Object.keys(out||{}).forEach(p =>
+    s.push({ category:'Outdated', suggestion:`npm install ${p}@latest` })
+  );
+  // vulnerabilities
+  if (Object.keys(vulns).length)
+    s.push({
+      category:'Vulnerabilities',
+      suggestion:'npm audit fix  — or run "snyk wizard" to apply fixes'
+    });
+  // license
+  lics.forEach(x =>
+    s.push({
+      category:'License',
+      suggestion:`Replace or whitelist "${x.name}" (${x.licenses})`
+    })
+  );
+  // lint
+  if (Array.isArray(lint) && lint.length)
+    s.push({ category:'Lint', suggestion:'npx eslint . --fix' });
+  return s;
+}
+
+async function sendEmailNotification(subject='DepTrack Alert', text='') {
+  const cfg  = vscode.workspace.getConfiguration('deptrack.email');
+  const user = cfg.get('auth.user'), pass = cfg.get('auth.pass'), to = cfg.get('to');
+  if (!user||!pass||!to) {
+    return vscode.window.showWarningMessage(
+      'Configure deptrack.email.auth.user, auth.pass, and to in settings. ' +
+      'For Gmail+2FA use an app‑specific password: https://support.google.com/mail/?p=InvalidSecondFactor'
+    );
   }
-  const webhook = new IncomingWebhook(url);
-  await webhook.send({ text });
-  vscode.window.showInformationMessage('DepTrack: Slack alert sent.');
+  const transporter = nodemailer.createTransport({ service:'gmail', auth:{ user, pass } });
+  try {
+    await transporter.sendMail({ from:user, to, subject, text });
+    vscode.window.showInformationMessage('DepTrack: Email sent');
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      err.responseCode===534
+        ? 'Gmail requires app‑specific password with 2FA'
+        : `Email failed: ${err.message}`
+    );
+  }
 }
 
-function exportCsv(context) {
+function exportCsv() {
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!latestPayload) return;
-  const ws = vscode.workspace.workspaceFolders[0].uri.fsPath;
-  let csv = 'Category,Package,Details\n';
-
-  Object.entries(latestPayload.outdated || {}).forEach(([pkg, i]) => {
-    csv += `Outdated,${pkg},"${i.current}→${i.latest}"\n`;
+  let csv = 'Category,Name,Details\n';
+  Object.entries(latestPayload.outdated)
+    .forEach(([p,i])=> csv+=`Outdated,${p},"${i.current}→${i.latest}"\n`);
+  Object.entries(latestPayload.vuln)
+    .forEach(([p,v])=> csv+=`Vulnerability,${p},"${v.severity}"\n`);
+  latestPayload.licenseIssues
+    .forEach(x=> csv+=`License,${x.name},"${x.licenses}"\n`);
+  (latestPayload.rawLint||[]).forEach(issue=>{
+    const f=issue.filePath||issue.file;
+    csv+=`Lint,${f},"${(issue.messages||[]).length} issues"\n`;
   });
-  Object.entries(latestPayload.vuln?.vulnerabilities || {}).forEach(([pkg, i]) => {
-    csv += `Vulnerability,${pkg},"severity ${JSON.stringify(i.severity)}"\n`;
-  });
-  latestPayload.licenses.forEach(l => {
-    csv += `License,${l.license},${l.count}\n`;
-  });
-  (latestPayload.lint || []).forEach(issue => {
-    csv += `ESLint,${issue.filePath},"${issue.messages.length} issues"\n`;
-  });
-
-  const uri = vscode.Uri.file(path.join(ws, 'deptrack-report.csv'));
-  vscode.workspace.fs.writeFile(uri, Buffer.from(csv, 'utf8'))
-    .then(() => vscode.window.showInformationMessage('CSV exported'))
-    .catch(e => vscode.window.showErrorMessage(`CSV export failed: ${e.message}`));
+  latestPayload.suggestions
+    .forEach(x=> csv+=`Suggestion,${x.category},"${x.suggestion}"\n`);
+  const uri = vscode.Uri.file(path.join(ws,'deptrack-report.csv'));
+  vscode.workspace.fs.writeFile(uri, Buffer.from(csv,'utf8'))
+    .then(()=>vscode.window.showInformationMessage('CSV exported'));
 }
 
-function exportPdf(context) {
+function exportPdf() {
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!latestPayload) return;
-  const ws = vscode.workspace.workspaceFolders[0].uri.fsPath;
-  const out = path.join(ws, 'deptrack-report.pdf');
+  const out = path.join(ws,'deptrack-report.pdf');
   const doc = new PDFDocument();
   doc.pipe(fs.createWriteStream(out));
 
-  doc.fontSize(20).text('DepTrack Report', { underline: true }).moveDown();
-  doc.fontSize(14).text('Outdated Packages:');
-  for (const [pkg, i] of Object.entries(latestPayload.outdated || {})) {
-    doc.text(` • ${pkg}: ${i.current} → ${i.latest}`);
-  }
+  doc.fontSize(20).text('DepTrack Report',{underline:true}).moveDown();
+  doc.text('Outdated Packages:');
+  Object.entries(latestPayload.outdated)
+    .forEach(([p,i])=>doc.text(` • ${p}: ${i.current}→${i.latest}`));
   doc.moveDown().text('Vulnerabilities:');
-  for (const [pkg, i] of Object.entries(latestPayload.vuln?.vulnerabilities || {})) {
-    doc.text(` • ${pkg}: severity ${JSON.stringify(i.severity)}`);
-  }
-  doc.moveDown().text('Licenses:');
-  latestPayload.licenses.forEach(l => doc.text(` • ${l.license}: ${l.count}`));
-  doc.moveDown().text('ESLint Issues:');
-  (latestPayload.lint || []).forEach(issue => {
-    doc.text(` • ${issue.filePath}: ${issue.messages.length} messages`);
+  Object.entries(latestPayload.vuln)
+    .forEach(([p,v])=>doc.text(` • ${p}: ${v.severity}`));
+  doc.moveDown().text('License Issues:');
+  latestPayload.licenseIssues
+    .forEach(x=>doc.text(` • ${x.name}: ${x.licenses}`));
+  doc.moveDown().text('Linting Issues:');
+  (latestPayload.rawLint||[]).forEach(issue=>{
+    const f=issue.filePath||issue.file;
+    doc.text(` • ${f}: ${(issue.messages||[]).length} issues`);
   });
+  doc.moveDown().text('Fix Suggestions:');
+  latestPayload.suggestions
+    .forEach(x=>doc.text(` • [${x.category}] ${x.suggestion}`));
 
   doc.end();
-  doc.on('finish', () => vscode.window.showInformationMessage('PDF exported'));
-}
-
-function getWebviewContent(context, panel) {
-  const html = fs.readFileSync(
-    path.join(context.extensionPath, 'dist', 'dashboard.html'),
-    'utf8'
-  );
-  const chartUri = panel.webview.asWebviewUri(
-    vscode.Uri.file(path.join(context.extensionPath, 'dist', 'chart.min.js'))
-  );
-  return html.replace(
-    /<script src="chart\.min\.js"><\/script>/,
-    `<script src="${chartUri}"></script>`
-  );
+  doc.on('finish',()=>vscode.window.showInformationMessage('PDF exported'));
 }
 
 function deactivate() {

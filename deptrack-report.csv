@@ -1,0 +1,35 @@
+Category,Package,Details
+Outdated,@slack/webhook,"6.1.0â†’7.0.5"
+Outdated,@vercel/ncc,"0.34.0â†’0.38.3"
+Outdated,pdfkit,"0.13.0â†’0.17.0"
+Vulnerability,0,"severity "high""
+Vulnerability,1,"severity "medium""
+Vulnerability,2,"severity "medium""
+Vulnerability,3,"severity "medium""
+Vulnerability,4,"severity "medium""
+Vulnerability,5,"severity "medium""
+Vulnerability,6,"severity "high""
+Vulnerability,7,"severity "medium""
+Vulnerability,8,"severity "medium""
+Vulnerability,9,"severity "medium""
+Vulnerability,10,"severity "high""
+License,MIT,304
+License,Apache-2.0,25
+License,ISC,127
+License,Python-2.0,1
+License,Undefined,2
+License,BlueOak-1.0.0,5
+License,BSD-2-Clause,13
+License,BSD*,2
+License,UNKNOWN,2
+License,BSD-3-Clause,8
+License,Custom: http://www.catonmat.net,1
+License,Artistic-2.0,1
+License,MIT*,3
+License,AFLv2.1, BSD,1
+License,Apache 2.0,1
+License,CC-BY-3.0,1
+License,CC0-1.0,2
+License,(MIT AND CC-BY-3.0),1
+License,0BSD,1
+License,(MIT OR CC0-1.0),1
