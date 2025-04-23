@@ -1,0 +1,1 @@
+{"coordinates":"pkg:npm/deep-is@0.1.4","description":"node\u0027s assert.deepEqual algorithm except for NaN being equal to NaN","reference":"https://ossindex.sonatype.org/component/pkg:npm/deep-is@0.1.4?utm_source\u003ddependency-check\u0026utm_medium\u003dintegration\u0026utm_content\u003d12.1.0","vulnerabilities":[],"sonatypeOssiScore":0.0}

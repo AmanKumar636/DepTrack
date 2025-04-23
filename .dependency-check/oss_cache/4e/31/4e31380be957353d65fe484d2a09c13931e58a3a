@@ -1,0 +1,1 @@
+{"coordinates":"pkg:npm/fs.realpath@1.0.0","description":"Use node\u0027s fs.realpath, but fall back to the JS implementation if the native one fails","reference":"https://ossindex.sonatype.org/component/pkg:npm/fs.realpath@1.0.0?utm_source\u003ddependency-check\u0026utm_medium\u003dintegration\u0026utm_content\u003d12.1.0","vulnerabilities":[],"sonatypeOssiScore":0.0}

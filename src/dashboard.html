@@ -1,199 +1,353 @@
-<!-- dist/dashboard.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <title>DepTrack Dashboard</title>
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src 'unsafe-inline' vscode-resource:; style-src 'unsafe-inline';">
+        content="default-src 'none'; script-src 'unsafe-inline' vscode-resource: data: https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data:;">
+  <!-- Load Chart.js from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <style>
-    body { margin:0; font-family:'Segoe UI',sans-serif; display:flex; height:100vh; background:#f0f2f5; }
-    #aside {
-      background:#1e272e; color:#fff; padding:1rem; min-width:220px;
-      display:flex; flex-direction:column; gap:.5rem;
-    }
-    #aside h2 { margin:0 0 .5rem; font-size:1.25rem; text-align:center; }
-    #aside button {
-      background:#57606f; border:none; color:#fff; padding:.75rem;
-      border-radius:6px; cursor:pointer; transition:background .2s;
-    }
-    #aside button:hover { background:#70a1ff; }
-    #content {
-      flex:1; padding:1rem; overflow-y:auto;
-      display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr));
-      gap:1rem;
-    }
-    .card {
-      background:#fff; border-radius:12px;
-      box-shadow:0 2px 8px rgba(0,0,0,.1);
-      transition:transform .2s,box-shadow .2s;
-      display:flex; flex-direction:column;
-    }
-    .card:hover {
-      transform:translateY(-4px);
-      box-shadow:0 4px 12px rgba(0,0,0,.15);
-    }
-    .card header {
-      background:linear-gradient(to right,#3742fa,#70a1ff);
-      color:#fff; padding:.85rem 1rem; font-size:1.05rem;
-      border-top-left-radius:12px; border-top-right-radius:12px;
-    }
-    .card .content {
-      padding:1rem; flex:1; overflow-y:auto; max-height:400px;
-    }
-    table { width:100%; border-collapse:collapse; font-size:.9rem; }
-    th,td { padding:.5rem; border:1px solid #e0e0e0; text-align:left; }
-    .toast {
-      position:fixed; bottom:1rem; right:1rem; padding:.75rem 1.25rem;
-      background:#2ed573; color:#fff; border-radius:8px;
-      box-shadow:0 2px 8px rgba(0,0,0,.2);
-      animation:fadeInOut 3s forwards; z-index:999;
-    }
-    @keyframes fadeInOut {
-      0%{opacity:0;transform:translateY(20px);}10%{opacity:1;transform:translateY(0);}
-      90%{opacity:1;}100%{opacity:0;transform:translateY(20px);}
-    }
-    .lint-card, .vuln-card, .license-card, .suggestions-card { grid-column: span 2; }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+    :root{--bg-dark:#1a1a2e;--bg-darker:#131325;--card-bg:#212142;--accent:#4ecca3;--text-light:#e0e1dd;--shadow:rgba(0,0,0,0.5);--radius:8px;--gap:1rem;--transition:0.2s;}
+    body{display:flex;height:100vh;font-family:'Segoe UI',sans-serif;background:var(--bg-dark);color:var(--text-light);overflow:hidden;}
+    aside#aside{width:300px;background:var(--bg-darker);padding:var(--gap);display:flex;flex-direction:column;gap:0.75rem;}
+    aside#aside h2{font-size:1.25rem;text-align:center;color:var(--accent);}
+    .email-row{display:flex;gap:0.5rem;align-items:center;}
+    .email-row input{flex:1;padding:0.5rem;border-radius:var(--radius);border:1px solid #2e2e4e;background:var(--card-bg);color:var(--text-light);}
+    .email-row button{padding:0.5rem 1rem;border:none;border-radius:var(--radius);background:var(--accent);color:var(--text-light);cursor:pointer;}
+    aside#aside button{display:flex;align-items:center;gap:0.75rem;background:none;border:none;color:var(--text-light);padding:0.75rem;font-size:1rem;border-radius:var(--radius);cursor:pointer;}
+    aside#aside button:hover,aside#aside button.active{background:rgba(78,204,163,0.15);}
+    .spinner{display:none;margin-left:0.5rem;}
+    .spinner.spin{display:inline-block;animation:spin 1s linear infinite;}
+    @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+    main#main{flex:1;display:flex;flex-direction:column;overflow:auto;}
+    header#header{padding:var(--gap) var(--gap) 0;}
+    header#header h1{font-size:1.5rem;color:var(--text-light);}
+    #controls{display:flex;align-items:center;gap:0.5rem;padding:0 var(--gap) var(--gap);background:var(--bg-darker);}
+    #viewSelect,#scanView,#scanAll{padding:0.5rem;border-radius:var(--radius);border:1px solid #2e2e4e;background:var(--card-bg);color:var(--text-light);cursor:pointer;}
+    section#cards{padding:var(--gap);display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:var(--gap);flex:1;overflow-y:auto;}
+    .card{background:var(--card-bg);border-radius:var(--radius);box-shadow:0 2px 8px var(--shadow);display:flex;flex-direction:column;transition:transform var(--transition);}
+    .card:hover{transform:translateY(-4px);}
+    .card header{padding:var(--gap);font-weight:bold;font-size:1rem;border-bottom:1px solid #2e2e4e;color:var(--accent);}
+    .card .content{padding:var(--gap);flex:1;overflow:hidden;}
+    table{width:100%;border-collapse:collapse;}
+    th,td{padding:0.5rem;text-align:left;font-size:0.9rem;border-bottom:1px solid #2e2e4e;color:var(--text-light);}
+    pre{white-space:pre-wrap;font-family:monospace;font-size:0.8rem;max-height:200px;overflow:auto;}
+    canvas{width:100% !important;height:200px !important;}
+    footer#footer{background:var(--card-bg);padding:var(--gap);text-align:center;font-size:0.95rem;color:var(--accent);border-top:1px solid #2e2e4e;}
+    .status{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle;}
+    .status.good{background:#4ecca3;}
+    .status.warning{background:gold;}
+    .status.critical{background:#ff4c4c;}
+    .card[data-view="secret"] .content,
+    .card[data-view="license"] .content{overflow-x:auto;}
+    #secretTable,#licenseTable{min-width:600px;}
+    .license-issues{list-style:none;padding-left:1rem;}
+    .license-issues li::before{content:"• ";}
+    .card[data-view="chatbot"] .content{display:flex;flex-direction:column;}
+    #chatContainer{flex:1;overflow:auto;margin-bottom:1rem;}
+    .input-row{display:flex;gap:0.5rem;}
+    .copyright{margin-top:auto;text-align:center;font-size:0.8rem;color:#666;}
   </style>
 </head>
 <body>
   <aside id="aside">
     <h2>DepTrack</h2>
-    <button id="refresh">🌐 Refresh</button>
-    <button id="health">⚙️ Health Check</button>
+    <div class="email-row">
+      <input id="emailInput" type="email" placeholder="you@example.com" />
+      <button id="sendInputEmail">Send</button>
+    </div>
+    <button id="refresh" class="active">🔄 Refresh <span id="spinner" class="spinner">⏳</span></button>
+    <button id="health">🩺 Health Check</button>
     <button id="email">✉️ Email Alert</button>
-    <button id="csv">📄 Export CSV</button>
-    <button id="pdf">📑 Export PDF</button>
+    <button id="csv">📑 Export CSV</button>
+    <button id="pdf">📄 Export PDF</button>
+    <div class="copyright">© Aman Kumar</div>
   </aside>
-  <div id="content">
-    <div class="card"><header>Outdated Packages</header>
-      <div class="content">
-        <table id="outdatedTable">
-          <thead><tr><th>Package</th><th>Current</th><th>Latest</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
+  <main id="main">
+    <header id="header"><h1>Security & Secret Scanning</h1></header>
+    <div id="controls">
+      <select id="viewSelect">
+        <option value="outdated">Outdated Packages</option>
+        <option value="vuln">Vulnerabilities</option>
+        <option value="suggestions">Fix Suggestions</option>
+        <option value="license">License Issues</option>
+        <option value="eslint">ESLint Issues</option>
+        <option value="duplication">Code Duplication</option>
+        <option value="complexity">Complexity</option>
+        <option value="secret">Secret Scanning</option>
+        <option value="depgraph">Dependency Graph</option>
+        <option value="sonar">Sonar Report</option>
+      </select>
+      <button id="scanView">Scan View</button>
+      <button id="scanAll">Scan All</button>
     </div>
-
-    <div class="card vuln-card"><header>Vulnerabilities</header>
-      <div class="content">
-        <table id="vulnDetailsTable">
-          <thead><tr><th>Package</th><th>Severity</th><th>Title</th></tr></thead>
-          <tbody></tbody>
-        </table>
+    <section id="cards">
+      <div class="card" data-view="log">
+        <header>Process Log</header>
+        <div class="content"><pre id="logOutput"></pre></div>
       </div>
-    </div>
-
-    <div class="card license-card"><header>License Issues</header>
-      <div class="content">
-        <table id="licenseTable">
-          <thead><tr><th>Package</th><th>License</th></tr></thead>
-          <tbody></tbody>
-        </table>
+      <div class="card" data-view="chatbot">
+        <header>Chatbot</header>
+        <div class="content">
+          <div id="chatContainer"></div>
+          <div class="input-row">
+            <input id="chatInput" type="text" placeholder="Type a message…"
+                   style="flex:1;padding:0.5rem;border:none;border-radius:var(--radius);" />
+            <button id="sendChat"
+                    style="padding:0.5rem 1rem;border:none;border-radius:var(--radius);
+                           background:var(--accent);color:var(--text-light);cursor:pointer;">
+              Send
+            </button>
+          </div>
+        </div>
       </div>
-    </div>
-
-    <div class="card lint-card"><header>Linting Issues</header>
-      <div class="content">
-        <table id="lintTable">
-          <thead><tr><th>File</th><th>Errors</th><th>Warnings</th></tr></thead>
-          <tbody></tbody>
-        </table>
+      <div class="card" data-view="outdated">
+        <header>Outdated Packages</header>
+        <div class="content">
+          <table id="outdatedTable">
+            <thead><tr><th></th><th>Package</th><th>Current</th><th>Latest</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
-    </div>
-
-    <div class="card suggestions-card"><header>Fix Suggestions</header>
-      <div class="content">
-        <table id="suggestionsTable">
-          <thead><tr><th>Category</th><th>Suggestion</th></tr></thead>
-          <tbody></tbody>
-        </table>
+      <div class="card" data-view="vuln">
+        <header>Vulnerabilities</header>
+        <div class="content">
+          <table id="vulnTable">
+            <thead><tr><th>Package</th><th>Severity</th><th>Title</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
-    </div>
-  </div>
-
+      <div class="card" data-view="suggestions">
+        <header>Fix Suggestions</header>
+        <div class="content">
+          <table id="suggestionsTable">
+            <thead><tr><th>Category</th><th>Suggestion</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card" data-view="license">
+        <header>License Issues</header>
+        <div class="content">
+          <table id="licenseTable">
+            <thead><tr><th>Package</th><th>License(s)</th><th>Issues</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card" data-view="eslint">
+        <header>ESLint Issues</header>
+        <div class="content">
+          <table id="eslintTable">
+            <thead><tr><th>File</th><th>Issues</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card" data-view="duplication">
+        <header>Code Duplication</header>
+        <div class="content">
+          <table id="dupTable">
+            <thead><tr><th>File A</th><th>Line A</th><th>File B</th><th>Line B</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card" data-view="complexity">
+        <header>Complexity</header>
+        <div class="content"><canvas id="complexityChart"></canvas></div>
+      </div>
+      <div class="card" data-view="secret">
+        <header>Secret Scanning</header>
+        <div class="content">
+          <table id="secretTable">
+            <thead><tr><th>File</th><th>Line</th><th>Rule</th><th>Match</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card" data-view="depgraph">
+        <header>Dependency Graph</header>
+        <div class="content"><canvas id="dep-graph"></canvas></div>
+      </div>
+      <div class="card" data-view="sonar">
+        <header>Sonar Report</header>
+        <div class="content"><pre id="sonarOutput"></pre></div>
+      </div>
+    </section>
+    <footer id="footer">ISE END SEM PROJECT</footer>
+  </main>
   <script>
     const vscode = acquireVsCodeApi();
-    document.getElementById('refresh').onclick = () => vscode.postMessage({command:'refresh'});
-    document.getElementById('health').onclick  = () => vscode.postMessage({command:'healthCheck'});
-    document.getElementById('email').onclick  = () => vscode.postMessage({command:'sendEmail'});
-    document.getElementById('csv').onclick    = () => vscode.postMessage({command:'exportCSV'});
-    document.getElementById('pdf').onclick    = () => vscode.postMessage({command:'exportPDF'});
+    let complexityChart, depChart;
+
+    function showSpinner() { document.getElementById('spinner').classList.add('spin'); }
+    function hideSpinner() { document.getElementById('spinner').classList.remove('spin'); }
+
+    const btnMap = {
+      refresh: 'refresh',
+      health:  'healthCheck',
+      email:   'sendEmail',
+      csv:     'exportCSV',
+      pdf:     'exportPDF'
+    };
+
+    ['refresh','health','email','csv','pdf'].forEach(id => {
+      document.getElementById(id).onclick = () => {
+        document.querySelector('button.active')?.classList.remove('active');
+        document.getElementById(id).classList.add('active');
+        if (id === 'refresh') showSpinner();
+        vscode.postMessage({ command: btnMap[id], email: document.getElementById('emailInput').value });
+      };
+    });
+
+    document.getElementById('sendInputEmail').onclick = () => {
+      const e = document.getElementById('emailInput');
+      if (!e.checkValidity()) return alert('Enter a valid email');
+      vscode.postMessage({ command: 'sendEmail', email: e.value });
+    };
+
+    const cards = document.querySelectorAll('.card[data-view]');
+    document.getElementById('scanView').onclick = () => {
+      const sel = document.getElementById('viewSelect').value;
+      cards.forEach(c => {
+        c.style.display = (c.dataset.view==='log'||c.dataset.view==='chatbot'||c.dataset.view===sel) ? 'flex' : 'none';
+      });
+    };
+    document.getElementById('scanAll').onclick = () => cards.forEach(c => c.style.display='flex');
 
     window.addEventListener('message', e => {
-      if (e.data.command === 'updateData') {
-        const { outdated, vuln, licenseIssues, rawLint, suggestions } = e.data.payload;
-        renderOutdated(outdated);
-        renderVulnDetails(vuln);
-        renderLicenseIssues(licenseIssues);
-        renderLint(rawLint);
-        renderSuggestions(suggestions);
-        showToast('✅ Data refreshed');
+      const msg = e.data;
+      if (msg.command==='logUpdate') {
+        document.getElementById('logOutput').textContent = msg.payload.join('\n');
+        return;
+      }
+      if (msg.command==='updateData' && msg.payload) {
+        hideSpinner();
+        const d = msg.payload;
+
+        // Outdated
+        const tbO = document.querySelector('#outdatedTable tbody'); tbO.innerHTML = '';
+        Object.entries(d.outdated||{}).forEach(([p,i]) => {
+          const tr = tbO.insertRow();
+          tr.innerHTML = `<td><span class="status ${i.status}"></span></td><td>${p}</td><td>${i.current}</td><td>${i.latest}</td>`;
+        });
+
+        // Vulnerabilities
+        const tbV = document.querySelector('#vulnTable tbody'); tbV.innerHTML = '';
+        Object.entries(d.vuln||{}).forEach(([p,v]) => {
+          const tr = tbV.insertRow();
+          tr.innerHTML = `<td>${p}</td><td>${v.severity}</td><td>${v.title}</td>`;
+        });
+
+        // Suggestions
+        const tbS = document.querySelector('#suggestionsTable tbody'); tbS.innerHTML = '';
+        (d.suggestions||[]).forEach(s => {
+          const tr = tbS.insertRow();
+          tr.innerHTML = `<td>${s.category}</td><td>${s.suggestion}</td>`;
+        });
+
+        // License
+        const tbL = document.querySelector('#licenseTable tbody'); tbL.innerHTML = '';
+        (d.licenseIssues||[]).forEach(x => {
+          const tr = tbL.insertRow();
+          tr.innerHTML = `<td>${x.pkg}</td><td>${x.licenses.join(', ')}</td><td><ul class="license-issues">${x.issues.map(i=>`<li>${i}</li>`).join('')}</ul></td>`;
+        });
+
+        // ESLint
+        const tbE = document.querySelector('#eslintTable tbody'); tbE.innerHTML = '';
+        Object.entries(d.eslintCounts||{}).forEach(([f,c]) => {
+          const tr = tbE.insertRow();
+          tr.innerHTML = `<td>${f}</td><td>${c} issues</td>`;
+        });
+
+        // Duplication
+        const tbD = document.querySelector('#dupTable tbody'); tbD.innerHTML = '';
+        (d.duplicationDetails||[]).forEach(m => {
+          const tr = tbD.insertRow();
+          tr.innerHTML = `<td>${m.fileA}</td><td>${m.lineA}</td><td>${m.fileB}</td><td>${m.lineB}</td>`;
+        });
+
+        // Complexity Chart
+        const cc = document.querySelector('.card[data-view="complexity"] .content');
+        if (!d.complexity?.length) {
+          cc.innerHTML = '<div>No complexity data</div>';
+        } else {
+          cc.innerHTML = '<canvas id="complexityChart"></canvas>';
+          const ctx = document.getElementById('complexityChart').getContext('2d');
+          complexityChart?.destroy();
+          complexityChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels: d.complexity.map(r => r.path),
+              datasets: [{ label: 'Cyclomatic', data: d.complexity.map(r => r.aggregate?.cyclomatic || 0) }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+          });
+        }
+
+        // Secret Scanning
+        const tbS2 = document.querySelector('#secretTable tbody'); tbS2.innerHTML = '';
+        (d.secrets||[]).forEach(s => {
+          const tr = tbS2.insertRow();
+          tr.innerHTML = `<td>${s.file}</td><td>${s.line}</td><td>${s.rule}</td><td style="font-family:monospace;">${s.match}</td>`;
+        });
+
+        // Dependency Graph Chart
+        const ctx2 = document.getElementById('dep-graph').getContext('2d');
+        depChart?.destroy();
+        const labels = Object.keys(d.depGraph||{});
+        const data   = labels.map(k => {
+          const raw = d.depGraph[k].version.replace(/^[^\d]*/, '');
+          const num = parseFloat(raw);
+          return isNaN(num) ? 0 : num;
+        });
+        depChart = new Chart(ctx2, {
+          type: 'bar',
+          data: { labels, datasets: [{ label: 'Versions', data }] },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true } }
+          }
+        });
+
+        // Sonar Output
+        const so = d.sonar || {};
+        document.getElementById('sonarOutput').textContent = so.error
+          ? `❌ Scan failed:\n${so.error}`
+          : `Quality Gate: ${so.qualityGate}`;
+
+        // Chat History
+        const ctr = document.getElementById('chatContainer'); ctr.innerHTML = '';
+        (d.chatHistory||[]).forEach(c => {
+          const div = document.createElement('div');
+          div.textContent = `${c.from}: ${c.text}`;
+          ctr.appendChild(div);
+        });
+        ctr.scrollTop = ctr.scrollHeight;
+      }
+
+      if (msg.command==='chatResponse' && msg.payload) {
+        const ctr = document.getElementById('chatContainer');
+        const div = document.createElement('div');
+        div.textContent = msg.payload.text;
+        ctr.appendChild(div);
+        ctr.scrollTop = ctr.scrollHeight;
       }
     });
 
-    function renderOutdated(out) {
-      const tb = document.querySelector('#outdatedTable tbody');
-      tb.innerHTML = '';
-      Object.entries(out||{}).forEach(([p,i])=>{
-        const r = tb.insertRow();
-        r.innerHTML = `<td>${p}</td><td>${i.current||'–'}</td><td>${i.latest||'–'}</td>`;
-      });
-    }
-
-    function renderVulnDetails(v) {
-      const tb = document.querySelector('#vulnDetailsTable tbody');
-      tb.innerHTML = '';
-      Object.entries(v||{}).forEach(([p,info])=>{
-        const r = tb.insertRow();
-        r.insertCell().textContent = p;
-        r.insertCell().textContent = info.severity;
-        r.insertCell().textContent = info.title || '';
-      });
-    }
-
-    function renderLicenseIssues(list) {
-      const tb = document.querySelector('#licenseTable tbody');
-      tb.innerHTML = '';
-      (list||[]).forEach(x=>{
-        const r = tb.insertRow();
-        r.insertCell().textContent = x.name;
-        r.insertCell().textContent = x.licenses;
-      });
-    }
-
-    function renderLint(lint) {
-      const arr = Array.isArray(lint) ? lint : [];
-      const sum = {};
-      arr.forEach(issue=>{
-        const f = issue.filePath||issue.file;
-        sum[f] = sum[f]||{e:0,w:0};
-        (issue.messages||[]).forEach(m=> m.severity===2? sum[f].e++ : sum[f].w++);
-      });
-      const tb = document.querySelector('#lintTable tbody');
-      tb.innerHTML = '';
-      Object.entries(sum).forEach(([f,c])=>{
-        const r = tb.insertRow();
-        r.innerHTML = `<td>${f}</td><td>${c.e}</td><td>${c.w}</td>`;
-      });
-    }
-
-    function renderSuggestions(sugg) {
-      const tb = document.querySelector('#suggestionsTable tbody');
-      tb.innerHTML = '';
-      (sugg||[]).forEach(x=>{
-        const r = tb.insertRow();
-        r.insertCell().textContent = x.category;
-        r.insertCell().textContent = x.suggestion;
-      });
-    }
-
-    function showToast(msg) {
-      const t = document.createElement('div');
-      t.className = 'toast'; t.textContent = msg;
-      document.body.appendChild(t);
-      setTimeout(()=>t.remove(),3000);
-    }
+    document.getElementById('sendChat').onclick = () => {
+      const txt = document.getElementById('chatInput').value.trim();
+      if (!txt) return;
+      vscode.postMessage({ command: 'chat', text: txt });
+      document.getElementById('chatInput').value = '';
+    };
   </script>
 </body>
 </html>

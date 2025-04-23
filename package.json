@@ -5,9 +5,10 @@
   "version": "0.0.1",
   "main": "./dist/index.js",
   "scripts": {
-    "build": "ncc build src/extension.js -o dist -e vscode && powershell -NoProfile -Command \"(Get-Content 'dist/index.js') | Where-Object { $_ -notmatch 'sourceMappingURL' } | Out-File 'dist/index.js' -Encoding utf8 -Force; Copy-Item 'src/dashboard.html' -Destination 'dist/dashboard.html' -Force; Copy-Item 'node_modules/chart.js/dist/chart.umd.js' -Destination 'dist/chart.min.js' -Force\"",
+    "build": "ncc build src/extension.js -o dist -e vscode && powershell -NoProfile -Command \"(Get-Content 'dist/index.js') | Where-Object { $_ -notmatch 'sourceMappingURL' } | Out-File 'dist/index.js' -Encoding utf8 -Force; Copy-Item 'src/dashboard.html' -Destination 'dist/dashboard.html' -Force\"",
     "watch:build": "chokidar \"src/**/*\" -c \"npm run build\"",
-    "lint": "eslint ."
+    "lint": "eslint .",
+	"duplication": "jscpd src --reporters json --output ./jscpd-report"
   },
   "engines": {
     "vscode": "^1.88.0"
@@ -30,40 +31,78 @@
         "deptrack.email.service": {
           "type": "string",
           "default": "gmail",
-          "description": "SMTP service for email alerts (e.g. gmail)"
+          "description": "SMTP service for email alerts"
         },
         "deptrack.email.auth.user": {
           "type": "string",
           "default": "",
-          "description": "SMTP username (your email address)"
+          "description": "SMTP username"
         },
         "deptrack.email.auth.pass": {
           "type": "string",
           "default": "",
-          "description": "SMTP password or app‑specific password"
+          "description": "SMTP password"
         },
         "deptrack.email.to": {
           "type": "string",
           "default": "",
-          "description": "Recipient email address for DepTrack alerts"
+          "description": "Recipient email address"
+        },
+        "deptrack.chatbot.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "OpenAI API key"
+        },
+        "deptrack.chatbot.model": {
+          "type": "string",
+          "default": "gpt-3.5-turbo",
+          "description": "Model for chatbot fixes"
         }
       }
     }
   },
   "dependencies": {
+    "axios": "^1.6.7",
+    "chalk": "^2.4.2",
     "chart.js": "^4.4.9",
-    "license-checker": "^25.0.1",
+    "debug": "^3.1.0",
+    "express": "^4.16.0",
+    "left-pad": "^1.1.3",
+    "lodash": "^4.17.0",
+    "minimist": "^0.0.1",
+    "moment": "^2.22.0",
+    "my-gpl-package": "^1.0.0",
+    "node-fetch": "^3.3.2",
     "nodemailer": "^6.10.1",
     "npm": "^10.9.2",
     "pdfkit": "^0.13.0",
     "run": "^1.5.0",
-    "snyk": "^1.1296.2"
+    "semver": "^7.7.1",
+    "strip-ansi": "^7.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.25.0",
     "@vercel/ncc": "^0.34.0",
     "chokidar-cli": "^3.0.0",
-    "eslint": "^9.25.0",
-    "globals": "^16.0.0"
+    "escomplex": "^2.0.0-alpha",
+    "eslint": "^9.25.1",
+    "git-secrets": "^0.0.11",
+    "gitleaks": "^1.0.0",
+    "globals": "^16.0.0",
+    "jscpd": "^4.0.5",
+    "license-checker": "^25.0.1",
+    "plato": "^1.7.0",
+    "snyk": "^1.1296.2",
+    "sonar-scanner": "^3.1.0"
+  },
+  "eslintConfig": {
+    "root": true,
+    "env": {
+      "node": true,
+      "es2021": true
+    },
+    "extends": [
+      "eslint:recommended"
+    ]
   }
 }
