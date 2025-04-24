@@ -120,7 +120,9 @@
     "watch:build": "chokidar 'src/**/*' -c 'npm run build'",
     "lint": "eslint .",
     "duplication": "jscpd src --reporters json --output report",
-    "dup": "jscpd . --min-lines 1 --reporters console,json --output report/jscpd --ignore \"node_modules/**\" --ignore \"dist/**\" --ignore \"report/**\""
+    "dup": "jscpd . --min-lines 1 --reporters console,json --output report/jscpd --ignore \"node_modules/**\" --ignore \"dist/**\" --ignore \"report/**\"",
+    "test": "jest",
+    "coverage": "jest --coverage"
   },
   "dependencies": {
     "axios": "^1.6.7",
@@ -136,14 +138,18 @@
     "strip-ansi": "^6.0.1"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.14",
     "@vercel/ncc": "^0.34.0",
+    "@vscode/test-electron": "^2.5.2",
     "@yarnpkg/lockfile": "^1.1.0",
     "chokidar-cli": "^3.0.0",
     "escomplex": "^2.0.0-alpha",
     "eslint": "^9.25.1",
+    "jest": "^29.7.0",
     "jscpd": "^4.0.5",
     "jsinspect": "^0.12.7",
     "plato": "^1.7.0",
+    "ts-jest": "^29.3.2",
     "typhonjs-escomplex": "^0.1.0",
     "vscode": "^1.1.37"
   }

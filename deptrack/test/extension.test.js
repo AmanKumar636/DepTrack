@@ -1,15 +1,43 @@
-const assert = require('assert');
-
-// You can import and use all API from the 'vscode' module
-// as well as import your extension to test it
+// deptrack/test/extension.test.js
 const vscode = require('vscode');
-// const myExtension = require('../extension');
+const extension = require('../../src/extension');
 
-suite('Extension Test Suite', () => {
-	vscode.window.showInformationMessage('Start all tests.');
+describe('DepTrack Extension', () => {
+  let context;
 
-	test('Sample test', () => {
-		assert.strictEqual(-1, [1, 2, 3].indexOf(5));
-		assert.strictEqual(-1, [1, 2, 3].indexOf(0));
-	});
+  beforeEach(() => {
+    // reset all call counts on your spies
+    jest.clearAllMocks();
+
+    // a fake extension context
+    context = { subscriptions: [] };
+  });
+
+  test('activate() registers all commands', () => {
+    extension.activate(context);
+
+    // list every command you register in extension.activate
+    const commands = [
+      'Aman.deptrack.openDashboard',
+      'Aman.deptrack.refresh',
+      'Aman.deptrack.healthCheck',
+      'Aman.deptrack.sendEmail',
+      'Aman.deptrack.exportCSV',
+      'Aman.deptrack.exportPDF',
+      'Aman.deptrack.chat'
+    ];
+
+    // assert registerCommand was called for each one
+    for (const cmd of commands) {
+      expect(vscode.commands.registerCommand).toHaveBeenCalledWith(
+        cmd,
+        expect.any(Function)
+      );
+    }
+  });
+
+  test('deactivate() does nothing (or your logic)', () => {
+    // if you have a deactivate(), call it and assert no error
+    expect(() => extension.deactivate()).not.toThrow();
+  });
 });

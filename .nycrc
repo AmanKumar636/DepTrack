@@ -1,0 +1,6 @@
+{
+  "extension": [".js"],
+  "include": ["src/**/*.js"],
+  "reporter": ["lcov", "text"],
+  "all": true
+}

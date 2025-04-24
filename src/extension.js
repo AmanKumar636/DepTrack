@@ -530,13 +530,21 @@ async function checkESLint(ws) {
 
 async function checkSonar(ws) {
   const fn = 'checkSonar';
-  const rootConfig = vscode.workspace.getConfiguration();
-  const token = rootConfig.get('deptrack.sonar.token')?.trim();
-  const projectKey = rootConfig.get('deptrack.sonar.projectKey')?.trim();
-  outputChannel.appendLine(`[Sonar] token=${token?.slice(0,4)}…, projectKey=${projectKey}`);
-  const host = (rootConfig.get('deptrack.sonar.hostUrl') || 'https://sonarcloud.io').replace(/\/$/, '');
+  const cfg = vscode.workspace.getConfiguration();
+
+  // VS Code settings → env vars fallback
+  const token      = cfg.get('deptrack.sonar.token')?.trim()        || process.env.SONAR_TOKEN?.trim();
+  const projectKey = cfg.get('deptrack.sonar.projectKey')?.trim()   || process.env.SONAR_PROJECT_KEY?.trim();
+  const host       = (cfg.get('deptrack.sonar.hostUrl') ||
+                      process.env.SONAR_HOST_URL ||
+                      'https://sonarcloud.io').replace(/\/$/, '');
+
+  outputChannel.appendLine(`[Sonar] token=${token?.slice(0,4) || '—'}…, projectKey=${projectKey || '—'}`);
   if (!token || !projectKey) {
-    outputChannel.appendLine(`[Sonar] skipped — configure both 'deptrack.sonar.token' and 'deptrack.sonar.projectKey' in settings`);
+    outputChannel.appendLine(
+      `[Sonar] skipped — set 'deptrack.sonar.token' & 'deptrack.sonar.projectKey' ` +
+      `in settings.json or export SONAR_TOKEN & SONAR_PROJECT_KEY`
+    );
     outputChannel.appendLine('[Sonar] done');
     return {};
   }
@@ -549,10 +557,8 @@ async function checkSonar(ws) {
   }
 
   outputChannel.appendLine('[Sonar] start');
-  let summary = '';
-  let metrics = {};
+  let summary = '', metrics = {};
 
-  // Build scanner properties, including exclusions for generated reports
   const props = [
     `-Dsonar.token=${token}`,
     `-Dsonar.projectKey=${projectKey}`,
@@ -560,7 +566,8 @@ async function checkSonar(ws) {
     '-Dsonar.qualitygate.wait=true',
     '-Dsonar.scm.disabled=true',
     '-Dsonar.sources=.',
-    '-Dsonar.exclusions=**/report/**,**/.scannerwork/**,**/node_modules/**,**/dist/**'
+    '-Dsonar.exclusions=**/report/**,**/.scannerwork/**,**/node_modules/**,**/dist/**',
+    '-Dsonar.scanner.skipSystemTruststore=true'
   ];
 
   try {
@@ -571,12 +578,12 @@ async function checkSonar(ws) {
     summary = '❌ Sonar scan failed';
   }
 
-  // Fetch quality metrics from SonarCloud API
+  // Pull metrics from SonarCloud
   try {
     const metricKeys = ['bugs','vulnerabilities','code_smells','coverage','duplicated_lines_density'].join(',');
     const url = `${host}/api/measures/component?component=${encodeURIComponent(projectKey)}&metricKeys=${metricKeys}`;
     const resp = await axios.get(url, { auth: { username: token, password: '' }, timeout: 10000 });
-    metrics = resp.data.component.measures.reduce((acc, m) => {
+    metrics = resp.data.component.measures.reduce((acc,m) => {
       acc[m.metric] = m.value;
       return acc;
     }, {});
@@ -668,47 +675,76 @@ async function checkDuplication(ws) {
   const fn = 'checkDuplication';
   outputChannel.appendLine('[Duplication] start');
 
+  // Determine jsinspect command
   const inspector = resolveCmd(ws, 'jsinspect') || 'npx jsinspect';
   const targetDir = process.platform === 'win32'
     ? ws.replace(/\\/g, '/')
     : ws;
 
-  // Skip all generated dirs AND src/extension.js
-  const ignorePattern = '(node_modules|dist|report|\\.scannerwork|src[\\\\/]extension\\.js)';
+  // Use separate --ignore flags for each glob
+  const ignoreGlobs = [
+    'report/**',
+    'node_modules/**',
+    'dist/**',
+    '.scannerwork/**'
+  ];
+  const ignoreFlags = ignoreGlobs.map(g => `--ignore "${g}"`).join(' ');
+  const cmd = `${inspector} --identical --threshold 1 --reporter json ${ignoreFlags} "${targetDir}"`;
 
-  const cmd = `${inspector} --identical --threshold 1 --reporter json --ignore "${ignorePattern}" "${targetDir}"`;
-
+  // Capture stdout even if jsinspect exits with code 1 (duplicates found)
+  let raw = '';
   try {
     outputChannel.appendLine(`[Duplication] running: ${cmd}`);
     const { stdout } = await execP(cmd, { cwd: ws, maxBuffer: 524288000 });
-    const matches = JSON.parse(stdout);
-
-    const res = [];
-    matches.forEach(match => {
-      const instances = match.instances;
-      for (let i = 0; i < instances.length; i++) {
-        for (let j = i + 1; j < instances.length; j++) {
-          const a = instances[i];
-          const b = instances[j];
-          res.push({
-            fileA: a.path,
-            lineA: a.lines[0],
-            fileB: b.path,
-            lineB: b.lines[0]
-          });
-        }
-      }
-    });
-
-    if (!res.length) outputChannel.appendLine('[Duplication] none');
-    return res;
+    raw = stdout;
   } catch (e) {
-    logError(fn, e);
-    outputChannel.appendLine('[Duplication] failed');
-    return [];
-  } finally {
-    outputChannel.appendLine('[Duplication] done');
+    raw = e.stdout || '';
+    if (!raw) {
+      logError(fn, e);
+      outputChannel.appendLine('[Duplication] failed');
+      outputChannel.appendLine('[Duplication] done');
+      return [];
+    }
   }
+
+  // Strip out any non-JSON prefixes/suffixes (e.g. error messages)
+  const firstBracket = raw.indexOf('[');
+  const lastBracket = raw.lastIndexOf(']');
+  if (firstBracket === -1 || lastBracket === -1) {
+    outputChannel.appendLine('[Duplication] parse failed (no JSON array)');
+    outputChannel.appendLine('[Duplication] done');
+    return [];
+  }
+  const jsonText = raw.slice(firstBracket, lastBracket + 1);
+
+  // Parse the JSON output
+  let matches;
+  try {
+    matches = JSON.parse(jsonText);
+  } catch (pe) {
+    logError(fn, pe);
+    outputChannel.appendLine('[Duplication] parse failed');
+    outputChannel.appendLine('[Duplication] done');
+    return [];
+  }
+
+  // Flatten each match into pairwise entries
+  const res = [];
+  matches.forEach(match => {
+    const inst = match.instances;
+    for (let i = 0; i < inst.length; i++) {
+      for (let j = i + 1; j < inst.length; j++) {
+        res.push({
+          fileA: inst[i].path, lineA: inst[i].lines[0],
+          fileB: inst[j].path, lineB: inst[j].lines[0]
+        });
+      }
+    }
+  });
+
+  if (!res.length) outputChannel.appendLine('[Duplication] none');
+  outputChannel.appendLine('[Duplication] done');
+  return res;
 }
 
 
