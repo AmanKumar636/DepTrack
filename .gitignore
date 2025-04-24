@@ -16,4 +16,5 @@ Thumbs.db
 
 # large auto-generated/build artifacts
 .dependency-check/
-snyk.exe
+snyk.exesecret.js
+.scannerwork/
