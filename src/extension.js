@@ -164,67 +164,93 @@ async function runAllChecks() {
     outputChannel.appendLine('[Outdated] done');
   }
 
-  // 2) Vulnerabilities
-  const vuln = {};
-  if (tools.snyk || tools.npm) {
-    outputChannel.appendLine('[Vuln] start via snyk');
-    let auditJson = null;
+// 2) Vulnerabilities
+const vuln = {};
+if (tools.snyk || tools.npm) {
+  outputChannel.appendLine('[Vuln] start');
 
-    // Try Snyk first
-    if (tools.snyk) {
-      try {
-        const raw = execSync(
-          `"${tools.snyk}" test --json`,
-          { cwd: ws, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 }
-        );
-        auditJson = JSON.parse(raw);
-      } catch (e) {
-        outputChannel.appendLine(`[Vuln] snyk error: ${e.message}`);
-      }
+  let auditJson = null;
+
+  // 2a) Try Snyk first
+  if (tools.snyk) {
+    // pick up org from env or VS Code config
+    const snykOrg = process.env.SNYK_ORG
+                 || vscode.workspace.getConfiguration('deptrack').get('snykOrg');
+    let cmdSnyk  = `"${tools.snyk}" test --json`;
+    if (snykOrg) {
+      cmdSnyk += ` --org=${snykOrg}`;
+      outputChannel.appendLine(`[Vuln] using SNYK_ORG=${snykOrg}`);
+    } else {
+      outputChannel.appendLine('[Vuln] ⚠️  no SNYK_ORG set; using default org');
     }
 
-    // Fallback to npm audit
-    if (!auditJson && tools.npm) {
-      outputChannel.appendLine('[Vuln] fallback to npm audit');
-      try {
-        const raw = execSync(
-          `"${tools.npm}" audit --json`,
-          { cwd: ws, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 }
-        );
-        auditJson = JSON.parse(raw);
-      } catch (e2) {
-        const out = (e2.stdout || '').toString().trim();
-        if (out) {
-          try { auditJson = JSON.parse(out); }
-          catch (pe) { outputChannel.appendLine(`[Vuln] npm audit parse error: ${pe.message}`); }
-        } else {
-          outputChannel.appendLine(`[Vuln] npm audit error: ${e2.message}`);
-        }
-      }
+    outputChannel.appendLine(`[Vuln] running: ${cmdSnyk}`);
+    try {
+      const raw = execSync(cmdSnyk, {
+        cwd: ws, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024
+      });
+      auditJson = JSON.parse(raw);
+      outputChannel.appendLine('[Vuln] done via snyk');
+    } catch (err) {
+      const out    = (err.stdout || '').toString().trim();
+      const errMsg = err.stderr ? err.stderr.toString().trim() : err.message;
+      outputChannel.appendLine(`[Vuln] snyk error: ${errMsg}`);
+      if (out) outputChannel.appendLine(`[Vuln] snyk stdout: ${out.substring(0,200)}…`);
     }
-
-    // Now extract vulnerabilities from either schema:
-    if (auditJson) {
-      // Snyk format: auditJson.vulnerabilities is an array
-      if (Array.isArray(auditJson.vulnerabilities)) {
-        auditJson.vulnerabilities.forEach(v => {
-          const pkg = v.packageName || v.name || v.module_name;
-          vuln[pkg] = { severity: v.severity, title: v.title || '' };
-        });
-      }
-      // npm audit format: auditJson.vulnerabilities is an object
-      else if (typeof auditJson.vulnerabilities === 'object') {
-        Object.entries(auditJson.vulnerabilities).forEach(([pkg, info]) => {
-          vuln[pkg] = {
-            severity: info.severity,
-            title:    info.title || info.name || ''
-          };
-        });
-      }
-    }
-
-    outputChannel.appendLine('[Vuln] done');
   }
+
+  // 2b) Fallback to npm audit
+  if (!auditJson && tools.npm) {
+    const cmdAudit = `"${tools.npm}" audit --json`;
+    outputChannel.appendLine('[Vuln] fallback to npm audit');
+    outputChannel.appendLine(`[Vuln] running: ${cmdAudit}`);
+    try {
+      const raw = execSync(cmdAudit, {
+        cwd: ws, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024
+      });
+      auditJson = JSON.parse(raw);
+      outputChannel.appendLine('[Vuln] done via npm audit');
+    } catch (err2) {
+      const out    = (err2.stdout || '').toString().trim();
+      const errMsg = err2.stderr ? err2.stderr.toString().trim() : err2.message;
+      if (out) {
+        try {
+          auditJson = JSON.parse(out);
+          outputChannel.appendLine('[Vuln] parsed vulnerabilities from npm stdout');
+        } catch (pe) {
+          outputChannel.appendLine(`[Vuln] npm audit parse error: ${pe.message}`);
+          outputChannel.appendLine(`[Vuln] npm stdout: ${out.substring(0,200)}…`);
+        }
+      } else {
+        outputChannel.appendLine(`[Vuln] npm audit error: ${errMsg}`);
+      }
+    }
+  }
+
+  // 2c) Extract vulnerabilities
+  if (auditJson && auditJson.vulnerabilities) {
+    if (Array.isArray(auditJson.vulnerabilities)) {
+      // Snyk format
+      auditJson.vulnerabilities.forEach(v => {
+        const pkg = v.packageName || v.name || v.module_name;
+        vuln[pkg] = { severity: v.severity, title: v.title || '' };
+      });
+    } else if (typeof auditJson.vulnerabilities === 'object') {
+      // npm audit format
+      Object.entries(auditJson.vulnerabilities).forEach(([pkg, info]) => {
+        vuln[pkg] = {
+          severity: info.severity,
+          title:    info.title || info.name || ''
+        };
+      });
+    }
+  } else {
+    outputChannel.appendLine('[Vuln] no audit results to parse');
+  }
+
+  outputChannel.appendLine('[Vuln] complete');
+}
+
 
 
   // 3) License
@@ -248,96 +274,199 @@ async function runAllChecks() {
     outputChannel.appendLine('[License] done');
   }
 
-  // 4) ESLint
-  const eslintCounts = {};
-  if (tools.eslint) {
-    outputChannel.appendLine('[ESLint] start');
-    const configPath = path.join(ws, '.eslintrc.json');
+// 4) ESLint
+const eslintCounts = {};
+if (tools.eslint) {
+  outputChannel.appendLine('[ESLint] start');
+
+  const configPath = path.join(ws, '.eslintrc.cjs');
+  const hasConfig  = fs.existsSync(configPath);
+  if (!hasConfig) {
+    outputChannel.appendLine('[ESLint] no .eslintrc.cjs found, using default/discovered config');
+  } else {
+    outputChannel.appendLine(`[ESLint] using override config: ${configPath}`);
+  }
+
+  try {
+    // Build engine options
+    const engineOpts = { cwd: ws };
+    if (hasConfig) {
+      engineOpts.overrideConfigFile = configPath;
+      // Ensure ESLint doesn’t merge in other .eslintrc.* files
+      engineOpts.useEslintrc = false;
+    }
+
+    const engine  = new ESLint(engineOpts);
+    const results = await engine.lintFiles(['src/**/*.js','src/**/*.ts']);
+    results.forEach(r => {
+      eslintCounts[path.relative(ws, r.filePath)] = r.messages.length;
+    });
+  } catch (apiErr) {
+    outputChannel.appendLine(`[ESLint] API error: ${apiErr.message}`);
+    outputChannel.appendLine('[ESLint] fallback to CLI');
+
+    // Build CLI command dynamically
+    let cliCmd = `"${tools.eslint}" . -f json`;
+    if (hasConfig) {
+      cliCmd += ` --config ${configPath}`;
+    } else {
+      outputChannel.appendLine('[ESLint] CLI: no config flag (using auto-discovery)');
+    }
+    outputChannel.appendLine(`[ESLint] running: ${cliCmd}`);
+
     try {
-      const engine  = new ESLint({ cwd:ws, overrideConfigFile:configPath });
-      const results = await engine.lintFiles(['src/**/*.js','src/**/*.ts']);
-      results.forEach(r => { eslintCounts[path.relative(ws,r.filePath)] = r.messages.length; });
-    } catch (apiErr) {
-      outputChannel.appendLine(`[ESLint] API error: ${apiErr.message}`);
-      outputChannel.appendLine('[ESLint] fallback to CLI');
+      const raw = execSync(cliCmd, {
+        cwd: ws,
+        encoding: 'utf8',
+        maxBuffer: 20 * 1024 * 1024
+      });
+      JSON.parse(raw).forEach(r => {
+        eslintCounts[path.relative(ws, r.filePath)] = r.messages.length;
+      });
+    } catch (cliErr) {
+      const stderr = (cliErr.stdout || '').toString();
+      outputChannel.appendLine(`[ESLint] CLI error: ${cliErr.message}`);
+      if (stderr) outputChannel.appendLine(`[ESLint] CLI output: ${stderr.substring(0,200)}…`);
+    }
+  }
+
+  outputChannel.appendLine('[ESLint] done');
+}
+
+
+// 5) Sonar
+const sonar = { qualityGate: 'NA', error: null };
+const propFile = path.join(ws, 'sonar-project.properties');
+
+if (!tools['sonar-scanner']) {
+  outputChannel.appendLine('[Sonar] sonar-scanner not installed, skipping');
+} else if (!fs.existsSync(propFile)) {
+  outputChannel.appendLine('[Sonar] sonar-project.properties not found, skipping scan');
+} else {
+  const token = process.env.SONAR_TOKEN
+              || vscode.workspace.getConfiguration('deptrack').get('sonarToken');
+  if (!token) {
+    outputChannel.appendLine('[Sonar] WARNING: SONAR_TOKEN not set; authentication will fail');
+  }
+
+  outputChannel.appendLine('[Sonar] start');
+  let cmd = `"${tools['sonar-scanner']}" -Dsonar.qualitygate.wait=true`;
+  if (token) cmd += ` -Dsonar.login=${token}`;
+  outputChannel.appendLine(`[Sonar] running: ${cmd}`);
+
+  try {
+    const out = execSync(cmd, { cwd: ws, encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 });
+    const m   = out.match(/Quality gate status:\s+(\w+)/);
+    sonar.qualityGate = m ? m[1] : 'UNKNOWN';
+    outputChannel.appendLine(`[Sonar] Quality gate: ${sonar.qualityGate}`);
+  } catch (e) {
+    sonar.error = e.message;
+    const std  = (e.stdout || '').toString().trim();
+    const err  = (e.stderr || '').toString().trim();
+    outputChannel.appendLine(`[Sonar] error: ${e.message}`);
+    if (std) outputChannel.appendLine(`[Sonar] stdout: ${std.substring(0,200)}…`);
+    if (err) outputChannel.appendLine(`[Sonar] stderr: ${err.substring(0,200)}…`);
+  }
+
+  outputChannel.appendLine('[Sonar] done');
+}
+
+// 6) Complexity via API
+let complexity = [];
+try {
+  // require the API and a glob helper
+  const escomplex = require('typhonjs-escomplex');
+  const glob      = require('glob');
+
+  // find all JS/TS under src
+  const files = glob.sync('src/**/*.@(js|ts)', { cwd: ws });
+  outputChannel.appendLine(`[Complexity] analyzing ${files.length} files via API`);
+
+  files.forEach(relPath => {
+    const abs   = path.join(ws, relPath);
+    const source = fs.readFileSync(abs, 'utf8');
+
+    // run the complexity analysis on the source
+    const report = escomplex.analyzeModule(source);
+    complexity.push({
+      path:      relPath,
+      aggregate: report.aggregate
+    });
+  });
+
+  outputChannel.appendLine('[Complexity] done via API');
+} catch (e) {
+  outputChannel.appendLine(`[Complexity] error: ${e.message}`);
+}
+
+ // 7) Duplication
+let duplicationDetails = [];
+const jscpdBin = tools.jscpd;
+
+if (!jscpdBin) {
+  outputChannel.appendLine('[Duplication] ✖️  jscpd CLI not found, skipping');
+} else {
+  const targetDir = fs.existsSync(path.join(ws, 'src')) ? 'src' : '.';
+  outputChannel.appendLine('[Duplication] start');
+  const cmd = `"${jscpdBin}" --reporters json --min-lines 2 ${targetDir}`;
+  outputChannel.appendLine(`[Duplication] running: ${cmd}`);
+
+  try {
+    const raw = execSync(cmd, {
+      cwd: ws,
+      encoding: 'utf8',
+      maxBuffer: 10 * 1024 * 1024
+    });
+
+    // 1) Try reading the on-disk report
+    const reportPath = path.join(ws, 'report', 'jscpd-report.json');
+    let data = null;
+
+    if (fs.existsSync(reportPath)) {
+      outputChannel.appendLine(`[Duplication] loading JSON report from ${reportPath}`);
       try {
-        const raw = execSync(
-          `"${tools.eslint}" . -f json --config .eslintrc.json`,
-          { cwd: ws, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 }
-        );
-        JSON.parse(raw).forEach(r => {
-          eslintCounts[path.relative(ws,r.filePath)] = r.messages.length;
-        });
-      } catch (cliErr) {
-        outputChannel.appendLine(`[ESLint] CLI error: ${cliErr.message}`);
+        const jsonTxt = fs.readFileSync(reportPath, 'utf8');
+        data = JSON.parse(jsonTxt);
+      } catch (e) {
+        outputChannel.appendLine(`[Duplication] failed to parse report file: ${e.message}`);
       }
-    }
-    outputChannel.appendLine('[ESLint] done');
-  }
-
-  // 5) Sonar
-  const sonar = { qualityGate:'NA', error:null };
-  if (tools['sonar-scanner'] && fs.existsSync(path.join(ws,'sonar-project.properties'))) {
-    outputChannel.appendLine('[Sonar] start');
-    try {
-      const out = execSync(
-        `"${tools['sonar-scanner']}" -Dsonar.qualitygate.wait=true`,
-        { cwd: ws, encoding:'utf8', maxBuffer:50*1024*1024 }
-      );
-      const m = out.match(/Quality gate status:\s+(\w+)/);
-      sonar.qualityGate = m?m[1]:'UNKNOWN';
-    } catch (e) {
-      sonar.error = e.message;
-      outputChannel.appendLine(`[Sonar] error: ${e.message}`);
-    }
-    outputChannel.appendLine('[Sonar] done');
-  }
-
-  // 6) Complexity
-  let complexity = [];
-  if (tools.escomplex) {
-    outputChannel.appendLine('[Complexity] start');
-    try {
-      const raw    = execSync(
-        `"${tools.escomplex}" . --json`,
-        { cwd: ws, encoding:'utf8', maxBuffer:10*1024*1024 }
-      );
-      const parsed = JSON.parse(raw);
-      complexity = Array.isArray(parsed)?parsed:(parsed.reports||[]);
-    } catch (e) {
-      outputChannel.appendLine(`[Complexity] error: ${e.message}`);
-    }
-    outputChannel.appendLine('[Complexity] done');
-  }
-
-  // 7) Duplication
-  let duplicationDetails = [];
-  if (tools.jscpd) {
-    outputChannel.appendLine('[Duplication] start');
-    try {
-      const raw = execSync(
-        `"${tools.jscpd}" --reporters json --min-lines 2 src`,
-        { cwd: ws, encoding:'utf8', maxBuffer:10*1024*1024 }
-      );
-      const clean      = stripAnsi(raw.toString());
-      const firstBrace = clean.indexOf('{');
-      if (firstBrace < 0) {
-        outputChannel.appendLine('[Duplication] warning: no JSON output from jscpd');
+    } else {
+      // 2) Fallback: strip ANSI and parse stdout
+      const clean = stripAnsi(raw).trim();
+      if (!clean) {
+        outputChannel.appendLine('[Duplication] ⚠️  no output from jscpd (empty stdout)');
       } else {
-        const data = JSON.parse(clean.slice(firstBrace));
-        (data.matches||[]).forEach(m => {
-          const [a,b] = m.instances;
-          duplicationDetails.push({
-            fileA: a.sourceId, lineA: a.start.line,
-            fileB: b.sourceId, lineB: b.start.line
-          });
-        });
+        try {
+          data = JSON.parse(clean);
+          outputChannel.appendLine('[Duplication] parsed JSON from stdout');
+        } catch (pe) {
+          outputChannel.appendLine(`[Duplication] JSON parse error: ${pe.message}`);
+        }
       }
-    } catch (e) {
-      outputChannel.appendLine(`[Duplication] error: ${e.message}`);
     }
-    outputChannel.appendLine('[Duplication] done');
+
+    // 3) Extract matches
+    if (data && Array.isArray(data.matches)) {
+      data.matches.forEach(m => {
+        const [a, b] = m.instances;
+        duplicationDetails.push({
+          fileA: a.sourceId, lineA: a.start.line,
+          fileB: b.sourceId, lineB: b.start.line
+        });
+      });
+    } else {
+      outputChannel.appendLine('[Duplication] ⚠️  no .matches array in JSON');
+    }
+  } catch (e) {
+    const out = (e.stdout || '').toString().trim();
+    const err = (e.stderr || '').toString().trim();
+    outputChannel.appendLine(`[Duplication] error: ${e.message}`);
+    if (out) outputChannel.appendLine(`[Duplication] stdout: ${out}`);
+    if (err) outputChannel.appendLine(`[Duplication] stderr: ${err}`);
   }
+
+  outputChannel.appendLine('[Duplication] done');
+}
 
   // 8) Secrets
   let secrets = [];
