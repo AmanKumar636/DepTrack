@@ -1,31 +1,31 @@
 {
   "statistics": {
-    "detectionDate": "2025-04-23T23:23:21.986Z",
+    "detectionDate": "2025-04-24T03:21:54.145Z",
     "formats": {
       "javascript": {
         "sources": {
           "src/extension.js": {
-            "lines": 515,
-            "tokens": 6620,
+            "lines": 797,
+            "tokens": 9425,
             "sources": 1,
-            "clones": 0,
-            "duplicatedLines": 0,
-            "duplicatedTokens": 0,
-            "percentage": 0,
-            "percentageTokens": 0,
+            "clones": 2,
+            "duplicatedLines": 14,
+            "duplicatedTokens": 168,
+            "percentage": 1.76,
+            "percentageTokens": 1.78,
             "newDuplicatedLines": 0,
             "newClones": 0
           }
         },
         "total": {
-          "lines": 515,
-          "tokens": 6620,
+          "lines": 797,
+          "tokens": 9425,
           "sources": 1,
-          "clones": 0,
-          "duplicatedLines": 0,
-          "duplicatedTokens": 0,
-          "percentage": 0,
-          "percentageTokens": 0,
+          "clones": 1,
+          "duplicatedLines": 7,
+          "duplicatedTokens": 84,
+          "percentage": 0.88,
+          "percentageTokens": 0.89,
           "newDuplicatedLines": 0,
           "newClones": 0
         }
@@ -33,8 +33,8 @@
       "markup": {
         "sources": {
           "src/dashboard.html": {
-            "lines": 352,
-            "tokens": 3747,
+            "lines": 377,
+            "tokens": 3952,
             "sources": 1,
             "clones": 0,
             "duplicatedLines": 0,
@@ -46,8 +46,8 @@
           }
         },
         "total": {
-          "lines": 352,
-          "tokens": 3747,
+          "lines": 377,
+          "tokens": 3952,
           "sources": 1,
           "clones": 0,
           "duplicatedLines": 0,
@@ -60,17 +60,54 @@
       }
     },
     "total": {
-      "lines": 867,
-      "tokens": 10367,
+      "lines": 1174,
+      "tokens": 13377,
       "sources": 2,
-      "clones": 0,
-      "duplicatedLines": 0,
-      "duplicatedTokens": 0,
-      "percentage": 0,
-      "percentageTokens": 0,
+      "clones": 1,
+      "duplicatedLines": 7,
+      "duplicatedTokens": 84,
+      "percentage": 0.6,
+      "percentageTokens": 0.63,
       "newDuplicatedLines": 0,
       "newClones": 0
     }
   },
-  "duplicates": []
+  "duplicates": [
+    {
+      "format": "javascript",
+      "lines": 8,
+      "fragment": ";\r\n      outputChannel.appendLine(`[Vuln] running: ${cmd}`);\r\n      try {\r\n        const raw = execSync(cmd, {\r\n          cwd: ws, encoding:'utf8', maxBuffer:20*1024*1024\r\n        });\r\n        auditJson = JSON.parse(raw);\r\n        outputChannel.appendLine('[Vuln] parsed via npm audit'",
+      "tokens": 0,
+      "firstFile": {
+        "name": "src\\extension.js",
+        "start": 227,
+        "end": 234,
+        "startLoc": {
+          "line": 227,
+          "column": 16,
+          "position": 2455
+        },
+        "endLoc": {
+          "line": 234,
+          "column": 30,
+          "position": 2539
+        }
+      },
+      "secondFile": {
+        "name": "src\\extension.js",
+        "start": 204,
+        "end": 211,
+        "startLoc": {
+          "line": 204,
+          "column": 9,
+          "position": 2189
+        },
+        "endLoc": {
+          "line": 211,
+          "column": 25,
+          "position": 2274
+        }
+      }
+    }
+  ]
 }

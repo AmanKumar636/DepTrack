@@ -1,0 +1,161 @@
+{
+  "statistics": {
+    "detectionDate": "2025-04-24T16:08:25.123Z",
+    "formats": {
+      "javascript": {
+        "sources": {
+          "src/extension.js": {
+            "lines": 790,
+            "tokens": 9688,
+            "sources": 1,
+            "clones": 2,
+            "duplicatedLines": 16,
+            "duplicatedTokens": 220,
+            "percentage": 2.03,
+            "percentageTokens": 2.27,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "src/eslint.js": {
+            "lines": 8,
+            "tokens": 66,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "src/dup2.js": {
+            "lines": 8,
+            "tokens": 80,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "src/dup1.js": {
+            "lines": 8,
+            "tokens": 80,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "src/complex.js": {
+            "lines": 9,
+            "tokens": 100,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          }
+        },
+        "total": {
+          "lines": 823,
+          "tokens": 10014,
+          "sources": 5,
+          "clones": 1,
+          "duplicatedLines": 8,
+          "duplicatedTokens": 110,
+          "percentage": 0.97,
+          "percentageTokens": 1.1,
+          "newDuplicatedLines": 0,
+          "newClones": 0
+        }
+      },
+      "markup": {
+        "sources": {
+          "src/dashboard.html": {
+            "lines": 224,
+            "tokens": 3479,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          }
+        },
+        "total": {
+          "lines": 224,
+          "tokens": 3479,
+          "sources": 1,
+          "clones": 0,
+          "duplicatedLines": 0,
+          "duplicatedTokens": 0,
+          "percentage": 0,
+          "percentageTokens": 0,
+          "newDuplicatedLines": 0,
+          "newClones": 0
+        }
+      }
+    },
+    "total": {
+      "lines": 1047,
+      "tokens": 13493,
+      "sources": 6,
+      "clones": 1,
+      "duplicatedLines": 8,
+      "duplicatedTokens": 110,
+      "percentage": 0.76,
+      "percentageTokens": 0.82,
+      "newDuplicatedLines": 0,
+      "newClones": 0
+    }
+  },
+  "duplicates": [
+    {
+      "format": "javascript",
+      "lines": 9,
+      "fragment": ", { cwd: ws, maxBuffer: 52428800 });\r\n      payload = JSON.parse(stdout);\r\n    } catch (e) {\r\n      const raw = e.stdout || '';\r\n      if (raw) {\r\n        try {\r\n          payload = JSON.parse(raw);\r\n        } catch (pe) {\r\n          vulnError = `npm audit JSON parse failed: ",
+      "tokens": 0,
+      "firstFile": {
+        "name": "src\\extension.js",
+        "start": 395,
+        "end": 403,
+        "startLoc": {
+          "line": 395,
+          "column": 16,
+          "position": 4206
+        },
+        "endLoc": {
+          "line": 403,
+          "column": 31,
+          "position": 4316
+        }
+      },
+      "secondFile": {
+        "name": "src\\extension.js",
+        "start": 377,
+        "end": 385,
+        "startLoc": {
+          "line": 377,
+          "column": 15,
+          "position": 3997
+        },
+        "endLoc": {
+          "line": 385,
+          "column": 26,
+          "position": 4107
+        }
+      }
+    }
+  ]
+}

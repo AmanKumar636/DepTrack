@@ -1,645 +1,834 @@
-const vscode        = require('vscode');
-const { execSync }  = require('child_process');
-const path          = require('path');
-const fs            = require('fs');
-const fetch         = require('node-fetch');
-const nodemailer    = require('nodemailer');
-const PDFDocument   = require('pdfkit');
-const semver        = require('semver');
-const stripAnsiMod  = require('strip-ansi');
-const stripAnsi     = stripAnsiMod.default || stripAnsiMod;
-const { ESLint }    = require('eslint');
+const vscode = require('vscode');
+const fs = require('fs');
+const path = require('path');
+const util = require('util');
+const { exec: execCb, execSync } = require('child_process');
+const execP = util.promisify(execCb);
+const axios = require('axios');
+const nodemailer = require('nodemailer');
+const PDFDocument = require('pdfkit');
+const semver = require('semver');
+const stripAnsi = require('strip-ansi').default || require('strip-ansi');
+const { ESLint } = require('eslint');
+const fg = require('fast-glob');
 
-// Secret‐scan patterns
 const patterns = [
-  { name: 'AWS Key',     regex: /AKIA[0-9A-Z]{16}/g },
-  { name: 'Private Key', regex: /-----BEGIN PRIVATE KEY-----/g },
+  { name: 'AWS Key',    regex: /AKIA[0-9A-Z]{16}/g },
+  { name: 'Private Key', regex: /-----BEGIN PRIVATE KEY-----/g }
 ];
+const forbiddenLicenses = ['GPL','AGPL','LGPL','PROPRIETARY','UNKNOWN'];
 
-let panel, refreshInterval, latestPayload = null, chatHistory = [];
-let outputChannel, logLines = [];
+let panel;
+let refreshInterval;
+let latestPayload = null;
+let chatHistory = [];
+let outputChannel;
+let logLines = [];
 const toolExists = {};
+let isScanning = false;
+
+function logError(fnName, err) {
+  const msg = stripAnsi(err.stack || err.message || err);
+  outputChannel && outputChannel.appendLine(`[${fnName}] ERROR: ${msg}`);
+}
 
 function resolveCmd(ws, tool) {
-  const bin   = process.platform === 'win32' ? `${tool}.cmd` : tool;
+  try {
+    execSync(`${tool} --version`, { stdio: 'ignore' });
+    toolExists[tool] = true;
+    return tool;
+  } catch {}
+  const bin = process.platform === 'win32' ? `${tool}.cmd` : tool;
   const local = path.join(ws, 'node_modules', '.bin', bin);
   if (fs.existsSync(local)) {
     toolExists[tool] = true;
     return local;
   }
-  try {
-    execSync(`${tool} --version`, { stdio:'ignore' });
-    toolExists[tool] = true;
-    return tool;
-  } catch {
-    toolExists[tool] = false;
-    return null;
-  }
+  toolExists[tool] = false;
+  return null;
 }
 
 async function scanSecrets(ws) {
+  const fn = 'scanSecrets';
+  outputChannel.appendLine('[Secrets] start');
   const results = [];
+  const ignored = ['.git', 'node_modules', 'dist', 'report', '.scannerwork'];
+
   async function walk(dir) {
-    for (const e of await fs.promises.readdir(dir, { withFileTypes:true })) {
-      const full = path.join(dir, e.name);
-      if (e.isDirectory() && !['.git','node_modules'].includes(e.name)) {
-        await walk(full);
-      } else if (e.isFile() && /\.(js|ts|py|sh|env|json)$/.test(e.name)) {
-        const txt = await fs.promises.readFile(full,'utf8');
-        patterns.forEach(p => {
-          let m;
-          while ((m = p.regex.exec(txt)) !== null) {
-            results.push({
-              file: path.relative(ws, full),
-              line: txt.slice(0, m.index).split('\n').length,
-              rule: p.name,
-              match: m[0]
-            });
+    try {
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+      for (const ent of entries) {
+        if (ignored.includes(ent.name)) continue;
+        const full = path.join(dir, ent.name);
+        if (ent.isDirectory()) {
+          await walk(full);
+        } else if (ent.isFile() && /\.(js|ts|py|sh|env|json)$/.test(ent.name)) {
+          let txt;
+          try { txt = await fs.promises.readFile(full, 'utf8'); } catch { continue; }
+          for (const p of patterns) {
+            let m;
+            while ((m = p.regex.exec(txt)) !== null) {
+              results.push({
+                file: path.relative(ws, full),
+                line: txt.slice(0, m.index).split('\n').length,
+                rule: p.name,
+                match: m[0]
+              });
+            }
           }
-        });
+        }
       }
+    } catch (e) {
+      logError(fn, e);
     }
   }
+
+
   await walk(ws);
+  outputChannel.appendLine(`[Secrets] found ${results.length} items`);
+  outputChannel.appendLine('[Secrets] done');
   return results;
 }
 
+
+/**
+ * Generates a flat dependency graph by reading package-lock.json (or yarn.lock) 
+ * and flattening nested dependencies.
+ */
+const { parse: parseYarnLock } = require('@yarnpkg/lockfile');
+
+async function checkDepGraph(ws) {
+  const fn       = 'checkDepGraph';
+  outputChannel.appendLine('[DepGraph] start');
+
+  const npmLock  = path.join(ws, 'package-lock.json');
+  const yarnLock = path.join(ws, 'yarn.lock');
+  let graph       = {};
+
+  try {
+    if (fs.existsSync(npmLock)) {
+      const lockRaw  = fs.readFileSync(npmLock, 'utf8');
+      const lockData = JSON.parse(lockRaw);
+
+      if (lockData.packages) {
+        // npm v7+ lockfileVersion 2: flat map under "packages"
+        for (const [pkgPath, info] of Object.entries(lockData.packages)) {
+          if (pkgPath === '') continue;              // skip root
+          const name = info.name
+                     || pkgPath.split('node_modules/').pop();
+          graph[name] = { version: info.version };
+        }
+      }
+      else if (lockData.dependencies) {
+        // classic npm lockfile
+        graph = flattenDeps(lockData);
+      }
+      outputChannel.appendLine(`[DepGraph] npm entries: ${Object.keys(graph).length}`);
+    }
+    else if (fs.existsSync(yarnLock)) {
+      // Yarn v1
+      const raw    = fs.readFileSync(yarnLock, 'utf8');
+      const parsed = parseYarnLock(raw);
+      if (parsed.type === 'success') {
+        for (const key of Object.keys(parsed.object)) {
+          const info = parsed.object[key];
+          const pkg  = key.replace(/@[^@]+$/, '');
+          graph[pkg] = { version: info.version };
+        }
+        outputChannel.appendLine(`[DepGraph] yarn entries: ${Object.keys(graph).length}`);
+      } else {
+        outputChannel.appendLine('[DepGraph] failed — invalid yarn.lock');
+      }
+    }
+    else {
+      outputChannel.appendLine('[DepGraph] skipped — no lockfile found');
+    }
+  } catch (e) {
+    logError(fn, e);
+    outputChannel.appendLine('[DepGraph] failed — could not parse lockfile');
+  }
+
+  outputChannel.appendLine('[DepGraph] done');
+  return graph;
+}
+
 function flattenDeps(tree, acc = {}) {
-  Object.entries(tree.dependencies || {}).forEach(([k, v]) => {
-    acc[k] = { version: v.version };
-    flattenDeps(v, acc);
-  });
+  for (const [name, info] of Object.entries(tree.dependencies || {})) {
+    acc[name] = { version: info.version };
+    flattenDeps(info, acc);
+  }
   return acc;
 }
 
-function activate(context) {
+function deactivate() {
+  clearInterval(refreshInterval);
+}
+
+async function activate(context) {
   outputChannel = vscode.window.createOutputChannel('DepTrack');
   const orig = outputChannel.appendLine.bind(outputChannel);
-  outputChannel.appendLine = l => {
-    orig(l);
-    logLines.push(l);
-    if (panel) panel.webview.postMessage({ command:'logUpdate', payload: logLines });
+  outputChannel.appendLine = line => {
+    const time = new Date().toLocaleTimeString();
+    const entry = `[${time}] ${stripAnsi(line)}`;
+    orig(entry);
+    logLines.push(entry);
+    panel?.webview.postMessage({ command: 'logUpdate', payload: logLines });
   };
+  outputChannel.appendLine('activate start');
 
+  // Open Dashboard command: creates panel and runs a single scan
   context.subscriptions.push(
-    vscode.commands.registerCommand('deptrack.openDashboard', () => {
+    vscode.commands.registerCommand('Aman.deptrack.openDashboard', () => {
+      outputChannel.appendLine('command openDashboard');
       if (!panel) {
         panel = vscode.window.createWebviewPanel(
           'deptrackDashboard',
           'DepTrack Dashboard',
           vscode.ViewColumn.One,
-          {
-            enableScripts: true,
-            localResourceRoots: [ vscode.Uri.file(path.join(context.extensionPath,'src')) ]
-          }
+          { enableScripts: true, localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, 'src'))] }
         );
-        const html = fs.readFileSync(
-          path.join(context.extensionPath,'src','dashboard.html'),
-          'utf8'
-        );
-        panel.webview.html = html;
+        panel.webview.html = fs.readFileSync(path.join(context.extensionPath, 'src', 'dashboard.html'), 'utf8');
         panel.webview.onDidReceiveMessage(onWebviewMessage, null, context.subscriptions);
-        panel.onDidDispose(() => { panel = null; clearInterval(refreshInterval); }, null, context.subscriptions);
+        panel.onDidDispose(() => { panel = null; }, null, context.subscriptions);
       }
+      // Run all checks once when the dashboard is opened
       runAllChecks();
-      if (!refreshInterval) {
-        refreshInterval = setInterval(runAllChecks, 5 * 60 * 1000);
-      }
     })
   );
+
+  // Manual refresh command
+  context.subscriptions.push(
+    vscode.commands.registerCommand('Aman.deptrack.refresh', runAllChecks)
+  );
+
+  // Other commands (healthCheck, sendEmail, exportCSV, exportPDF, chat)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('Aman.deptrack.healthCheck', runHealthCheck),
+    vscode.commands.registerCommand('Aman.deptrack.sendEmail', args => sendEmailNotification('DepTrack Alert', 'See report.', args)),
+    vscode.commands.registerCommand('Aman.deptrack.exportCSV', exportCsv),
+    vscode.commands.registerCommand('Aman.deptrack.exportPDF', exportPdf),
+    vscode.commands.registerCommand('Aman.deptrack.chat', args => handleChat(args))
+  );
+
+  // Open the dashboard (runs one scan via openDashboard handler)
+  vscode.commands.executeCommand('Aman.deptrack.openDashboard');
+  outputChannel.appendLine('activate done');
 }
 
 async function onWebviewMessage(msg) {
+  outputChannel.appendLine(`onWebviewMessage ${msg.command}`);
   switch (msg.command) {
-    case 'refresh':     return runAllChecks();
+    case 'refresh': return runAllChecks();
+    case 'scanView': return runAllChecks();
+    case 'scanAll': return runAllChecks();
     case 'healthCheck': return runHealthCheck();
-    case 'sendEmail':   return sendEmailNotification('DepTrack Alert','See report.',msg.email);
-    case 'exportCSV':   return exportCsv();
-    case 'exportPDF':   return exportPdf();
-    case 'chat':        return handleChat(msg.text);
+    case 'sendEmail': return sendEmailNotification('DepTrack Alert', 'See report.', msg.email);
+    case 'exportCSV': return exportCsv();
+    case 'exportPDF': return exportPdf();
+    case 'chat': return handleChat(msg.text);
+    default: outputChannel.appendLine(`[onWebviewMessage] unknown: ${msg.command}`);
   }
 }
 
 async function runAllChecks() {
-  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!ws) { vscode.window.showErrorMessage('Open a workspace first'); return; }
+  if (isScanning) return;
+  isScanning = true;
 
-  const tools = {};
-  ['npm','snyk','escomplex','eslint','jscpd','license-checker','sonar-scanner']
-    .forEach(t => tools[t] = resolveCmd(ws, t));
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!ws) {
+    vscode.window.showErrorMessage('Open a workspace first');
+    isScanning = false;
+    return;
+  }
 
   logLines = [];
   outputChannel.show(true);
-  outputChannel.appendLine('=== DepTrack: starting checks ===');
+  outputChannel.appendLine('runAllChecks start');
 
-  // 1) Outdated
-  const outdated = {};
-  if (tools.npm) {
-    outputChannel.appendLine('[Outdated] start');
-    let raw = '';
-    try {
-      raw = execSync(
-        `"${tools.npm}" outdated --json`,
-        { cwd: ws, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 }
-      );
-    } catch (e) {
-      raw = (e.stdout || '').toString();
-      if (!raw) {
-        outputChannel.appendLine(`[Outdated] warning: ${e.message}`);
-      }
+  // Initialize result placeholders
+  let outdated = {};
+  let vulnPayload = { data: {}, error: null };
+  let licenseIssues = [];
+  let eslintDetails = [];
+  let sonarResult = {};
+  let complexity = [];
+  let duplicationDetails = [];
+  let secrets = [];
+  let depGraph = {};
+
+  // 1) Outdated Packages
+  outputChannel.appendLine('-> checkOutdated');
+  try { outdated = await checkOutdated(ws); }
+  catch (e) { logError('runAllChecks.checkOutdated', e); }
+
+  // 2) Vulnerabilities
+  outputChannel.appendLine('-> checkVuln');
+  try { vulnPayload = await checkVuln(ws); }
+  catch (e) { logError('runAllChecks.checkVuln', e); }
+
+  // 3) License Issues
+  outputChannel.appendLine('-> checkLicenses');
+  try { licenseIssues = await checkLicenses(ws); }
+  catch (e) { logError('runAllChecks.checkLicenses', e); }
+
+  // 4) ESLint
+  outputChannel.appendLine('-> checkESLint');
+  try { eslintDetails = await checkESLint(ws); }
+  catch (e) { logError('runAllChecks.checkESLint', e); }
+
+  // 5) Sonar
+  outputChannel.appendLine('-> checkSonar');
+  try { sonarResult = await checkSonar(ws); }
+  catch (e) { logError('runAllChecks.checkSonar', e); }
+
+  // 6) Complexity
+  outputChannel.appendLine('-> checkComplexity');
+  try { complexity = await checkComplexity(ws); }
+  catch (e) { logError('runAllChecks.checkComplexity', e); }
+
+  // 7) Duplication
+  outputChannel.appendLine('-> checkDuplication');
+  try { duplicationDetails = await checkDuplication(ws); }
+  catch (e) { logError('runAllChecks.checkDuplication', e); }
+
+  // 8) Secret Scan
+  outputChannel.appendLine('-> scanSecrets');
+  try { secrets = await scanSecrets(ws); }
+  catch (e) { logError('runAllChecks.scanSecrets', e); }
+
+  // 9) Dependency Graph
+  outputChannel.appendLine('-> checkDepGraph');
+  try { depGraph = await checkDepGraph(ws); }
+  catch (e) { logError('runAllChecks.checkDepGraph', e); }
+
+  // Store latest payload for exports and dashboard
+  latestPayload = {
+    outdated,
+    vuln: vulnPayload.data,
+    vulnError: vulnPayload.error,
+    licenseIssues,
+    eslintDetails,
+    sonarResult,
+    complexity,
+    duplicationDetails,
+    secrets,
+    depGraph,
+    chatHistory
+  };
+
+  // Send data to the dashboard webview
+  if (panel?.webview) {
+    panel.webview.postMessage({
+      command: 'updateData',
+      payload: latestPayload
+    });
+  }
+
+  outputChannel.appendLine('runAllChecks done');
+  isScanning = false;
+}
+// Updated checkOutdated: treats npm outdated exit-code 1 as normal, cleans up logging
+async function checkOutdated(ws) {
+  const fn = 'checkOutdated';
+  const npm = resolveCmd(ws, 'npm');
+  const res = {};
+  const pkgJson = path.join(ws, 'package.json');
+
+  if (!npm) {
+    outputChannel.appendLine('[Outdated] skipped — npm not found');
+    return res;
+  }
+  if (!fs.existsSync(pkgJson)) {
+    outputChannel.appendLine('[Outdated] skipped — no package.json');
+    return res;
+  }
+
+  outputChannel.appendLine('[Outdated] start');
+  let raw = '';
+  try {
+    const { stdout } = await execP(`"${npm}" outdated --json`, { cwd: ws, maxBuffer: 52428800 });
+    raw = stdout.trim();
+  } catch (e) {
+    // exit code >0 may simply indicate outdated packages
+    raw = (e.stdout || '').trim();
+    if (!raw) {
+      logError(fn, e);
+      outputChannel.appendLine('[Outdated] done');
+      return res;
     }
-    try {
-      const data = raw.trim() ? JSON.parse(raw) : {};
-      Object.entries(data).forEach(([pkg,info]) => {
-        const diff = semver.diff(info.current, info.latest);
-        outdated[pkg] = {
-          current: info.current,
-          latest:  info.latest,
-          status:  diff==='major'?'critical':diff==='minor'?'warning':'good'
-        };
-      });
-    } catch (parseErr) {
-      outputChannel.appendLine(`[Outdated] parse error: ${parseErr.message}`);
-    }
+  }
+
+  let data = {};
+  try {
+    data = raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    logError(fn, e);
+    outputChannel.appendLine('[Outdated] JSON parse failed');
     outputChannel.appendLine('[Outdated] done');
+    return res;
   }
 
-// 2) Vulnerabilities
-const vuln = {};
-if (tools.snyk || tools.npm) {
+  for (const [pkg, info] of Object.entries(data)) {
+    const diff = semver.diff(info.current, info.latest);
+    res[pkg] = {
+      current: info.current,
+      latest:  info.latest,
+      status:  diff === 'major' ? 'critical' : diff === 'minor' ? 'warning' : 'good'
+    };
+  }
+
+  const count = Object.keys(res).length;
+  if (!count) {
+    outputChannel.appendLine('[Outdated] none found');
+  } else {
+    outputChannel.appendLine(`[Outdated] found ${count} outdated package${count > 1 ? 's' : ''}`);
+  }
+  outputChannel.appendLine('[Outdated] done');
+  return res;
+}
+
+
+// Updated checkVuln: treats Snyk exit-code 1 as normal, silences raw snippet logs
+async function checkVuln(ws) {
+  const fn = 'checkVuln';
+  const snyk = resolveCmd(ws, 'snyk');
+  const npm  = resolveCmd(ws, 'npm');
+  const res  = {};
+  let vulnError = null;
+  const pkgJson = path.join(ws, 'package.json');
+
+  if (!fs.existsSync(pkgJson)) {
+    outputChannel.appendLine('[Vuln] skipped — no package.json');
+    return { data: res, error: null };
+  }
+
   outputChannel.appendLine('[Vuln] start');
+  let payload = null;
 
-  let auditJson = null;
-
-  // 2a) Try Snyk first
-  if (tools.snyk) {
-    // pick up org from env or VS Code config
-    const snykOrg = process.env.SNYK_ORG
-                 || vscode.workspace.getConfiguration('deptrack').get('snykOrg');
-    let cmdSnyk  = `"${tools.snyk}" test --json`;
-    if (snykOrg) {
-      cmdSnyk += ` --org=${snykOrg}`;
-      outputChannel.appendLine(`[Vuln] using SNYK_ORG=${snykOrg}`);
-    } else {
-      outputChannel.appendLine('[Vuln] ⚠️  no SNYK_ORG set; using default org');
-    }
-
-    outputChannel.appendLine(`[Vuln] running: ${cmdSnyk}`);
+  if (snyk) {
     try {
-      const raw = execSync(cmdSnyk, {
-        cwd: ws, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024
-      });
-      auditJson = JSON.parse(raw);
-      outputChannel.appendLine('[Vuln] done via snyk');
-    } catch (err) {
-      const out    = (err.stdout || '').toString().trim();
-      const errMsg = err.stderr ? err.stderr.toString().trim() : err.message;
-      outputChannel.appendLine(`[Vuln] snyk error: ${errMsg}`);
-      if (out) outputChannel.appendLine(`[Vuln] snyk stdout: ${out.substring(0,200)}…`);
-    }
-  }
-
-  // 2b) Fallback to npm audit
-  if (!auditJson && tools.npm) {
-    const cmdAudit = `"${tools.npm}" audit --json`;
-    outputChannel.appendLine('[Vuln] fallback to npm audit');
-    outputChannel.appendLine(`[Vuln] running: ${cmdAudit}`);
-    try {
-      const raw = execSync(cmdAudit, {
-        cwd: ws, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024
-      });
-      auditJson = JSON.parse(raw);
-      outputChannel.appendLine('[Vuln] done via npm audit');
-    } catch (err2) {
-      const out    = (err2.stdout || '').toString().trim();
-      const errMsg = err2.stderr ? err2.stderr.toString().trim() : err2.message;
-      if (out) {
+      const { stdout } = await execP(`"${snyk}" test --json`, { cwd: ws, maxBuffer: 52428800 });
+      payload = JSON.parse(stdout);
+    } catch (e) {
+      const raw = e.stdout || '';
+      if (raw) {
         try {
-          auditJson = JSON.parse(out);
-          outputChannel.appendLine('[Vuln] parsed vulnerabilities from npm stdout');
+          payload = JSON.parse(raw);
         } catch (pe) {
-          outputChannel.appendLine(`[Vuln] npm audit parse error: ${pe.message}`);
-          outputChannel.appendLine(`[Vuln] npm stdout: ${out.substring(0,200)}…`);
+          vulnError = `Snyk JSON parse failed: ${pe.message}`;
         }
       } else {
-        outputChannel.appendLine(`[Vuln] npm audit error: ${errMsg}`);
+        vulnError = `Snyk failed: ${stripAnsi(e.stderr || e.message)}`;
       }
     }
   }
 
-  // 2c) Extract vulnerabilities
-  if (auditJson && auditJson.vulnerabilities) {
-    if (Array.isArray(auditJson.vulnerabilities)) {
-      // Snyk format
-      auditJson.vulnerabilities.forEach(v => {
-        const pkg = v.packageName || v.name || v.module_name;
-        vuln[pkg] = { severity: v.severity, title: v.title || '' };
-      });
-    } else if (typeof auditJson.vulnerabilities === 'object') {
-      // npm audit format
-      Object.entries(auditJson.vulnerabilities).forEach(([pkg, info]) => {
-        vuln[pkg] = {
-          severity: info.severity,
-          title:    info.title || info.name || ''
-        };
-      });
+  if (!payload && npm) {
+    try {
+      const { stdout } = await execP(`"${npm}" audit --json`, { cwd: ws, maxBuffer: 52428800 });
+      payload = JSON.parse(stdout);
+    } catch (e) {
+      const raw = e.stdout || '';
+      if (raw) {
+        try {
+          payload = JSON.parse(raw);
+        } catch (pe) {
+          vulnError = `npm audit JSON parse failed: ${pe.message}`;
+        }
+      } else {
+        vulnError = `npm audit failed: ${stripAnsi(e.stderr || e.message)}`;
+      }
     }
-  } else {
-    outputChannel.appendLine('[Vuln] no audit results to parse');
   }
 
-  outputChannel.appendLine('[Vuln] complete');
+  if (payload && typeof payload === 'object') {
+    const list = Array.isArray(payload.vulnerabilities)
+               ? payload.vulnerabilities
+               : Object.values(payload.vulnerabilities || {});
+    outputChannel.appendLine(`[Vuln] total vulnerabilities: ${list.length}`);
+    for (const v of list) {
+      const pkgName = v.packageName || v.name || v.module_name;
+      const severity = (v.severity || v.cvssScore || 'unknown').toString().toLowerCase();
+      const title    = v.title || v.overview || '';
+      (res[pkgName] ||= []).push({ severity, title });
+    }
+  } else if (vulnError) {
+    outputChannel.appendLine(`[Vuln] error: ${vulnError}`);
+  }
+
+  if (!Object.keys(res).length && !vulnError) {
+    outputChannel.appendLine('[Vuln] none found');
+  }
+  outputChannel.appendLine('[Vuln] done');
+  return { data: res, error: vulnError };
 }
 
-
-
-  // 3) License
-  const licenseIssues = [];
-  if (tools['license-checker']) {
-    outputChannel.appendLine('[License] start');
-    try {
-      const raw = execSync(
-        `"${tools['license-checker']}" --json`,
-        { cwd: ws, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }
-      );
-      const lc = JSON.parse(raw);
-      Object.entries(lc).forEach(([pkg,info]) => {
-        const lic    = Array.isArray(info.licenses)?info.licenses:[info.licenses];
-        const issues = lic.some(l=>/AGPL|GPL/.test(l)) ? ['Restrictive'] : [];
-        if (issues.length) licenseIssues.push({ pkg, licenses:lic, issues });
-      });
-    } catch (e) {
-      outputChannel.appendLine(`[License] error: ${e.message}`);
+async function checkLicenses(ws) {
+  const fn = 'checkLicenses';
+  outputChannel.appendLine('[License] start');
+  const tool = resolveCmd(ws, 'license-checker');
+  if (!tool) { outputChannel.appendLine('[License] skipped'); outputChannel.appendLine('[License] done'); return []; }
+  let res = [];
+  try {
+    outputChannel.appendLine('[License] running');
+    const { stdout } = await execP(`"${tool}" --json`, { cwd: ws });
+    const data = JSON.parse(stdout);
+    for (const [pkg, info] of Object.entries(data)) {
+      const ls = info.licenses ? (Array.isArray(info.licenses) ? info.licenses : [info.licenses]) : ['UNKNOWN'];
+      const bad = ls.filter(l => forbiddenLicenses.some(f => l.toUpperCase().includes(f)));
+      if (bad.length) res.push({ pkg, licenses: bad });
     }
-    outputChannel.appendLine('[License] done');
+  } catch (e) {
+    logError(fn, e);
   }
+  if (!res.length) outputChannel.appendLine('[License] none');
+  outputChannel.appendLine('[License] done');
+  return res;
+}
 
-// 4) ESLint
-const eslintCounts = {};
-if (tools.eslint) {
+async function checkESLint(ws) {
+  const fn = 'checkESLint';
   outputChannel.appendLine('[ESLint] start');
 
-  const configPath = path.join(ws, '.eslintrc.cjs');
-  const hasConfig  = fs.existsSync(configPath);
-  if (!hasConfig) {
-    outputChannel.appendLine('[ESLint] no .eslintrc.cjs found, using default/discovered config');
-  } else {
-    outputChannel.appendLine(`[ESLint] using override config: ${configPath}`);
-  }
+  // Only lint our src folder
+  const patterns = ['src/**/*.{js,ts}'];
+  let res = [];
 
   try {
-    // Build engine options
-    const engineOpts = { cwd: ws };
-    if (hasConfig) {
-      engineOpts.overrideConfigFile = configPath;
-      // Ensure ESLint doesn’t merge in other .eslintrc.* files
-      engineOpts.useEslintrc = false;
-    }
-
-    const engine  = new ESLint(engineOpts);
-    const results = await engine.lintFiles(['src/**/*.js','src/**/*.ts']);
-    results.forEach(r => {
-      eslintCounts[path.relative(ws, r.filePath)] = r.messages.length;
+    const eslint = new ESLint({
+      cwd: ws,
+      // Merge in our rule override. Other config files (eslintrc, ignore) are respected.
+      overrideConfig: {
+        rules: {
+          'semi': ['error', 'always']
+        }
+      }
     });
-  } catch (apiErr) {
-    outputChannel.appendLine(`[ESLint] API error: ${apiErr.message}`);
-    outputChannel.appendLine('[ESLint] fallback to CLI');
 
-    // Build CLI command dynamically
-    let cliCmd = `"${tools.eslint}" . -f json`;
-    if (hasConfig) {
-      cliCmd += ` --config ${configPath}`;
-    } else {
-      outputChannel.appendLine('[ESLint] CLI: no config flag (using auto-discovery)');
+    const results = await eslint.lintFiles(patterns);
+    for (const r of results) {
+      const relativePath = path.relative(ws, r.filePath);
+      for (const m of r.messages) {
+        res.push({
+          file:    relativePath,
+          line:    m.line,
+          rule:    m.ruleId,
+          message: m.message
+        });
+      }
     }
-    outputChannel.appendLine(`[ESLint] running: ${cliCmd}`);
-
-    try {
-      const raw = execSync(cliCmd, {
-        cwd: ws,
-        encoding: 'utf8',
-        maxBuffer: 20 * 1024 * 1024
-      });
-      JSON.parse(raw).forEach(r => {
-        eslintCounts[path.relative(ws, r.filePath)] = r.messages.length;
-      });
-    } catch (cliErr) {
-      const stderr = (cliErr.stdout || '').toString();
-      outputChannel.appendLine(`[ESLint] CLI error: ${cliErr.message}`);
-      if (stderr) outputChannel.appendLine(`[ESLint] CLI output: ${stderr.substring(0,200)}…`);
-    }
+  } catch (e) {
+    logError(fn, e);
   }
 
+  if (!res.length) {
+    outputChannel.appendLine('[ESLint] none detected');
+  }
   outputChannel.appendLine('[ESLint] done');
+  return res;
 }
 
+async function checkSonar(ws) {
+  const fn = 'checkSonar';
+  const rootConfig = vscode.workspace.getConfiguration();
+  const token = rootConfig.get('deptrack.sonar.token')?.trim();
+  const projectKey = rootConfig.get('deptrack.sonar.projectKey')?.trim();
+  outputChannel.appendLine(`[Sonar] token=${token?.slice(0,4)}…, projectKey=${projectKey}`);
+  const host = (rootConfig.get('deptrack.sonar.hostUrl') || 'https://sonarcloud.io').replace(/\/$/, '');
+  if (!token || !projectKey) {
+    outputChannel.appendLine(`[Sonar] skipped — configure both 'deptrack.sonar.token' and 'deptrack.sonar.projectKey' in settings`);
+    outputChannel.appendLine('[Sonar] done');
+    return {};
+  }
 
-// 5) Sonar
-const sonar = { qualityGate: 'NA', error: null };
-const propFile = path.join(ws, 'sonar-project.properties');
-
-if (!tools['sonar-scanner']) {
-  outputChannel.appendLine('[Sonar] sonar-scanner not installed, skipping');
-} else if (!fs.existsSync(propFile)) {
-  outputChannel.appendLine('[Sonar] sonar-project.properties not found, skipping scan');
-} else {
-  const token = process.env.SONAR_TOKEN
-              || vscode.workspace.getConfiguration('deptrack').get('sonarToken');
-  if (!token) {
-    outputChannel.appendLine('[Sonar] WARNING: SONAR_TOKEN not set; authentication will fail');
+  const scanner = resolveCmd(ws, 'sonar-scanner');
+  if (!scanner) {
+    outputChannel.appendLine('[Sonar] skipped — sonar-scanner not found');
+    outputChannel.appendLine('[Sonar] done');
+    return {};
   }
 
   outputChannel.appendLine('[Sonar] start');
-  let cmd = `"${tools['sonar-scanner']}" -Dsonar.qualitygate.wait=true`;
-  if (token) cmd += ` -Dsonar.login=${token}`;
-  outputChannel.appendLine(`[Sonar] running: ${cmd}`);
+  let summary = '';
+  let metrics = {};
+
+  // Build scanner properties, including exclusions for generated reports
+  const props = [
+    `-Dsonar.token=${token}`,
+    `-Dsonar.projectKey=${projectKey}`,
+    `-Dsonar.host.url=${host}`,
+    '-Dsonar.qualitygate.wait=true',
+    '-Dsonar.scm.disabled=true',
+    '-Dsonar.sources=.',
+    '-Dsonar.exclusions=**/report/**,**/.scannerwork/**,**/node_modules/**,**/dist/**'
+  ];
 
   try {
-    const out = execSync(cmd, { cwd: ws, encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 });
-    const m   = out.match(/Quality gate status:\s+(\w+)/);
-    sonar.qualityGate = m ? m[1] : 'UNKNOWN';
-    outputChannel.appendLine(`[Sonar] Quality gate: ${sonar.qualityGate}`);
-  } catch (e) {
-    sonar.error = e.message;
-    const std  = (e.stdout || '').toString().trim();
-    const err  = (e.stderr || '').toString().trim();
-    outputChannel.appendLine(`[Sonar] error: ${e.message}`);
-    if (std) outputChannel.appendLine(`[Sonar] stdout: ${std.substring(0,200)}…`);
-    if (err) outputChannel.appendLine(`[Sonar] stderr: ${err.substring(0,200)}…`);
+    await execP(`"${scanner}" ${props.join(' ')}`, { cwd: ws, maxBuffer: 209715200 });
+    summary = '✅ Quality Gate passed';
+  } catch (err) {
+    logError(fn, err);
+    summary = '❌ Sonar scan failed';
+  }
+
+  // Fetch quality metrics from SonarCloud API
+  try {
+    const metricKeys = ['bugs','vulnerabilities','code_smells','coverage','duplicated_lines_density'].join(',');
+    const url = `${host}/api/measures/component?component=${encodeURIComponent(projectKey)}&metricKeys=${metricKeys}`;
+    const resp = await axios.get(url, { auth: { username: token, password: '' }, timeout: 10000 });
+    metrics = resp.data.component.measures.reduce((acc, m) => {
+      acc[m.metric] = m.value;
+      return acc;
+    }, {});
+  } catch (apiErr) {
+    logError(`${fn} API`, apiErr);
   }
 
   outputChannel.appendLine('[Sonar] done');
+  return { passed: summary.startsWith('✅'), summary, metrics };
 }
 
-// 6) Complexity via API
-let complexity = [];
-try {
-  // require the API and a glob helper
-  const escomplex = require('typhonjs-escomplex');
-  const glob      = require('glob');
+async function checkComplexity(ws) {
+  const fn = 'checkComplexity';
+  outputChannel.appendLine('[Complexity] start');
 
-  // find all JS/TS under src
-  const files = glob.sync('src/**/*.@(js|ts)', { cwd: ws });
-  outputChannel.appendLine(`[Complexity] analyzing ${files.length} files via API`);
+  // 1) find the plato binary
+  const tool = resolveCmd(ws, 'plato');
+  if (!tool) {
+    outputChannel.appendLine(
+      "[Complexity] skipped — 'plato' not found; install with 'npm install --save-dev plato'"
+    );
+    outputChannel.appendLine('[Complexity] done');
+    return [];
+  }
 
-  files.forEach(relPath => {
-    const abs   = path.join(ws, relPath);
-    const source = fs.readFileSync(abs, 'utf8');
+  // 2) prepare the report directory
+  const reportDir = path.join(ws, 'report', 'plato');
+  fs.mkdirSync(reportDir, { recursive: true });
 
-    // run the complexity analysis on the source
-    const report = escomplex.analyzeModule(source);
-    complexity.push({
-      path:      relPath,
-      aggregate: report.aggregate
+  // 3) run plato
+  const cmd = `"${tool}" -r -d "${reportDir}" src`;
+  try {
+    await execP(cmd, { cwd: ws, maxBuffer: 209715200 });
+
+    const reportFile = path.join(reportDir, 'report.json');
+    if (!fs.existsSync(reportFile)) {
+      outputChannel.appendLine(
+        "[Complexity] no report.json found — did Plato actually run?"
+      );
+      outputChannel.appendLine('[Complexity] done');
+      return [];
+    }
+
+    // 4) parse the JSON
+    const raw  = fs.readFileSync(reportFile, 'utf8');
+    const data = JSON.parse(raw);
+
+    // 5) map over data.reports (always an array)
+    const reports = Array.isArray(data.reports) ? data.reports : [];
+    const results = reports.map(r => {
+      const comp = r.complexity || {};
+      const sloc = comp.sloc || {};
+
+      // pick the logical SLOC if present, else physical, else 0
+      const logicalSLOC =
+        typeof sloc.logical === 'number'
+          ? sloc.logical
+          : typeof sloc.physical === 'number'
+          ? sloc.physical
+          : 0;
+
+      return {
+        path: path.relative(ws, r.info.file || ''),
+        aggregate: {
+          cyclomatic:      typeof comp.cyclomatic     === 'number' ? comp.cyclomatic     : 0,
+          sloc:            logicalSLOC,
+          maintainability: typeof comp.maintainability === 'number' ? comp.maintainability : 0
+        }
+      };
     });
-  });
 
-  outputChannel.appendLine('[Complexity] done via API');
-} catch (e) {
-  outputChannel.appendLine(`[Complexity] error: ${e.message}`);
+    if (!results.length) {
+      outputChannel.appendLine('[Complexity] none detected');
+    }
+
+    return results;
+  } catch (e) {
+    logError(fn, e);
+    outputChannel.appendLine(
+      "[Complexity] failed — check that 'plato' is installed and your source directory exists"
+    );
+    return [];
+  } finally {
+    outputChannel.appendLine('[Complexity] done');
+  }
 }
-
- // 7) Duplication
-let duplicationDetails = [];
-const jscpdBin = tools.jscpd;
-
-if (!jscpdBin) {
-  outputChannel.appendLine('[Duplication] ✖️  jscpd CLI not found, skipping');
-} else {
-  const targetDir = fs.existsSync(path.join(ws, 'src')) ? 'src' : '.';
+	
+async function checkDuplication(ws) {
+  const fn = 'checkDuplication';
   outputChannel.appendLine('[Duplication] start');
-  const cmd = `"${jscpdBin}" --reporters json --min-lines 2 ${targetDir}`;
-  outputChannel.appendLine(`[Duplication] running: ${cmd}`);
+
+  const inspector = resolveCmd(ws, 'jsinspect') || 'npx jsinspect';
+  const targetDir = process.platform === 'win32'
+    ? ws.replace(/\\/g, '/')
+    : ws;
+
+  // Skip all generated dirs AND src/extension.js
+  const ignorePattern = '(node_modules|dist|report|\\.scannerwork|src[\\\\/]extension\\.js)';
+
+  const cmd = `${inspector} --identical --threshold 1 --reporter json --ignore "${ignorePattern}" "${targetDir}"`;
 
   try {
-    const raw = execSync(cmd, {
-      cwd: ws,
-      encoding: 'utf8',
-      maxBuffer: 10 * 1024 * 1024
-    });
+    outputChannel.appendLine(`[Duplication] running: ${cmd}`);
+    const { stdout } = await execP(cmd, { cwd: ws, maxBuffer: 524288000 });
+    const matches = JSON.parse(stdout);
 
-    // 1) Try reading the on-disk report
-    const reportPath = path.join(ws, 'report', 'jscpd-report.json');
-    let data = null;
-
-    if (fs.existsSync(reportPath)) {
-      outputChannel.appendLine(`[Duplication] loading JSON report from ${reportPath}`);
-      try {
-        const jsonTxt = fs.readFileSync(reportPath, 'utf8');
-        data = JSON.parse(jsonTxt);
-      } catch (e) {
-        outputChannel.appendLine(`[Duplication] failed to parse report file: ${e.message}`);
-      }
-    } else {
-      // 2) Fallback: strip ANSI and parse stdout
-      const clean = stripAnsi(raw).trim();
-      if (!clean) {
-        outputChannel.appendLine('[Duplication] ⚠️  no output from jscpd (empty stdout)');
-      } else {
-        try {
-          data = JSON.parse(clean);
-          outputChannel.appendLine('[Duplication] parsed JSON from stdout');
-        } catch (pe) {
-          outputChannel.appendLine(`[Duplication] JSON parse error: ${pe.message}`);
+    const res = [];
+    matches.forEach(match => {
+      const instances = match.instances;
+      for (let i = 0; i < instances.length; i++) {
+        for (let j = i + 1; j < instances.length; j++) {
+          const a = instances[i];
+          const b = instances[j];
+          res.push({
+            fileA: a.path,
+            lineA: a.lines[0],
+            fileB: b.path,
+            lineB: b.lines[0]
+          });
         }
       }
-    }
+    });
 
-    // 3) Extract matches
-    if (data && Array.isArray(data.matches)) {
-      data.matches.forEach(m => {
-        const [a, b] = m.instances;
-        duplicationDetails.push({
-          fileA: a.sourceId, lineA: a.start.line,
-          fileB: b.sourceId, lineB: b.start.line
-        });
-      });
-    } else {
-      outputChannel.appendLine('[Duplication] ⚠️  no .matches array in JSON');
-    }
+    if (!res.length) outputChannel.appendLine('[Duplication] none');
+    return res;
   } catch (e) {
-    const out = (e.stdout || '').toString().trim();
-    const err = (e.stderr || '').toString().trim();
-    outputChannel.appendLine(`[Duplication] error: ${e.message}`);
-    if (out) outputChannel.appendLine(`[Duplication] stdout: ${out}`);
-    if (err) outputChannel.appendLine(`[Duplication] stderr: ${err}`);
+    logError(fn, e);
+    outputChannel.appendLine('[Duplication] failed');
+    return [];
+  } finally {
+    outputChannel.appendLine('[Duplication] done');
   }
-
-  outputChannel.appendLine('[Duplication] done');
 }
 
-  // 8) Secrets
-  let secrets = [];
-  outputChannel.appendLine('[Secrets] start');
-  try { secrets = await scanSecrets(ws); }
-  catch (e) { outputChannel.appendLine(`[Secrets] error: ${e.message}`); }
-  outputChannel.appendLine('[Secrets] done');
 
-  // 9) Dependency Graph
-  let depGraph = {};
-  if (tools.npm) {
-    outputChannel.appendLine('[DepGraph] start');
-    try {
-      const raw = execSync(
-        `"${tools.npm}" ls --all --json`,
-        { cwd: ws, encoding:'utf8', maxBuffer:50*1024*1024 }
-      );
-      depGraph = flattenDeps(JSON.parse(raw));
-    } catch {
-      outputChannel.appendLine('[DepGraph] npm ls failed, fallback to package.json');
-      try {
-        const pkg = JSON.parse(fs.readFileSync(path.join(ws,'package.json'),'utf8'));
-        depGraph = Object.fromEntries(
-          Object.entries(pkg.dependencies||{}).map(([k,v])=>[k,{version:v}])
-            .concat(Object.entries(pkg.devDependencies||{}).map(([k,v])=>[k,{version:v}]))
-        );
-      } catch (e) {
-        outputChannel.appendLine(`[DepGraph] fallback error: ${e.message}`);
-      }
-    }
-    outputChannel.appendLine('[DepGraph] done');
-  }
-
-  const suggestions = makeSuggestions(outdated,vuln,licenseIssues,eslintCounts);
-  latestPayload = { outdated,vuln,licenseIssues,eslintCounts,sonar,complexity,duplicationDetails,secrets,depGraph,suggestions,chatHistory };
-  if (panel) panel.webview.postMessage({ command:'updateData', payload:latestPayload });
-
-  outputChannel.appendLine('=== DepTrack: checks complete ===');
-}
-
-function makeSuggestions(o,v,l,e){
-  const list = [];
-  Object.keys(o).forEach(p => list.push({category:'Outdated', suggestion:`npm install ${p}@latest`}));
-  if (Object.keys(v).length) list.push({category:'Vulnerabilities', suggestion:'npm audit fix'});
-  l.forEach(x => list.push({category:'License', suggestion:`Review ${x.pkg}`}));
-  if (Object.values(e).reduce((a,b)=>a+b,0)>0) list.push({category:'ESLint', suggestion:'Fix ESLint issues'});
-  return list;
-}
-
-async function handleChat(text){
-  chatHistory.push({from:'You',text});
+async function handleChat(text) {
+  chatHistory.push({ from: 'You', text });
+  const cfg    = vscode.workspace.getConfiguration('deptrack.chatbot');
+  const apiKey = cfg.get('apiKey');
+  const model  = cfg.get('model') || 'gpt-3.5-turbo';
   let reply = '';
-  try{
-    const res  = await fetch('https://api.affiliateplus.xyz/api/chat?message='+encodeURIComponent(text));
-    const json = await res.json();
-    reply      = json.response||json.message||'❌ No response';
-  }catch(e){
-    reply=`❌ Chat error: ${e.message}`;
+  if (!apiKey) {
+    reply = '❌ Set API key';
+  } else {
+    try {
+      const res = await axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        { model, messages: [{ role: 'user', content: text }] },
+        { headers: { Authorization: `Bearer ${apiKey}` } }
+      );
+      reply = res.data.choices[0].message.content.trim();
+    } catch (e) {
+      logError('handleChat', e);
+      reply = '❌ Chat error';
+    }
   }
-  chatHistory.push({from:'Bot',text:reply});
-  if(panel) panel.webview.postMessage({command:'chatResponse',payload:{text:reply}});
+  chatHistory.push({ from: 'Bot', text: reply });
+  panel && panel.webview.postMessage({ command: 'chatResponse', payload: { text: reply } });
 }
 
-async function runHealthCheck(){
+async function runHealthCheck() {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if(!ws) return;
-  try{
+  if (!ws) return;
+  try {
     await Promise.all([
-      toolExists.npm  && Promise.resolve(execSync(`${resolveCmd(ws,'npm')} outdated --json`,{cwd:ws})),
-      toolExists.snyk && Promise.resolve(execSync(`${resolveCmd(ws,'snyk')} test --json`,{cwd:ws})),
-      Promise.resolve(execSync('eslint . -f json',{cwd:ws,maxBuffer:20*1024*1024}))
+      toolExists.npm    && execP(`${resolveCmd(ws,'npm')} outdated --json`, { cwd: ws }),
+      toolExists.snyk   && execP(`${resolveCmd(ws,'snyk')} test --json`, { cwd: ws }),
+      execP('eslint . -f json', { cwd: ws })
     ]);
     vscode.window.showInformationMessage('DepTrack: All systems go');
-  }catch{
-    vscode.window.showWarningMessage('DepTrack: Issues detected');
+  } catch (e) {
+    logError('runHealthCheck', e);
   }
 }
 
-async function sendEmailNotification(subject,text,overrideTo){
-  const cfg  = vscode.workspace.getConfiguration('deptrack.email');
-  const user = cfg.get('auth.user'), pass = cfg.get('auth.pass'),
-        to   = overrideTo||cfg.get('to');
-  if(!user||!pass||!to){
-    return vscode.window.showWarningMessage('Configure deptrack.email.auth or recipient.');
-  }
+async function sendEmailNotification(subject, text, overrideTo) {
+  const cfg = vscode.workspace.getConfiguration('deptrack.email');
   const transporter = nodemailer.createTransport({
-    service: cfg.get('service')||'gmail',
-    auth:    { user, pass }
+    service: cfg.get('service') || 'gmail',
+    auth: { user: cfg.get('auth.user'), pass: cfg.get('auth.pass') }
   });
-  try{
-    await transporter.sendMail({ from:user, to, subject, text });
-    vscode.window.showInformationMessage(`DepTrack: Email sent to ${to}`);
-  }catch(e){
-    outputChannel.appendLine(`[Email] error: ${e.message}`);
-    vscode.window.showErrorMessage(`Email failed: ${e.message}`);
+  const to = overrideTo || cfg.get('to');
+  if (!cfg.get('auth.user') || !cfg.get('auth.pass') || !to) return;
+  try {
+    await transporter.sendMail({ from: cfg.get('auth.user'), to, subject, text });
+  } catch (e) {
+    logError('sendEmailNotification', e);
   }
 }
 
-function exportCsv(){
-  if(!latestPayload) return;
-  const ws = vscode.workspace.workspaceFolders[0].uri.fsPath;
-  let csv = 'Category,Name,Details\n';
-  Object.entries(latestPayload.outdated).forEach(([p,i])=>{
-    csv+=`Outdated,${p},"${i.current}→${i.latest}"\n`;
-  });
-  Object.entries(latestPayload.vuln).forEach(([p,v])=>{
-    csv+=`Vulnerability,${p},"${v.severity}"\n`;
-  });
-  latestPayload.suggestions.forEach(s=>{
-    csv+=`Suggestion,${s.category},"${s.suggestion}"\n`;
-  });
-  latestPayload.licenseIssues.forEach(x=>{
-    csv+=`License,${x.pkg},"${x.licenses.join(', ')}: ${x.issues.join('; ')}"\n`;
-  });
-  Object.entries(latestPayload.eslintCounts).forEach(([f,c])=>{
-    csv+=`ESLint,${f},"${c} issues"\n`;
-  });
-  latestPayload.duplicationDetails.forEach(d=>{
-    csv+=`Duplication,${d.fileA}:${d.lineA},${d.fileB}:${d.lineB}\n`;
-  });
-  latestPayload.secrets.forEach(s=>{
-    csv+=`Secret,${s.file},${s.line},${s.rule}\n`;
-  });
-  Object.entries(latestPayload.depGraph).forEach(([n,i])=>{
-    csv+=`Dependency,${n},"${i.version}"\n`;
-  });
-  latestPayload.chatHistory.forEach(c=>{
-    const t=c.text.replace(/"/g,'""');
-    csv+=`Chat,${c.from},"${t}"\n`;
-  });
-  const uri = vscode.Uri.file(path.join(ws,'deptrack-report.csv'));
-  vscode.workspace.fs.writeFile(uri,Buffer.from(csv,'utf8'))
-    .then(()=>vscode.window.showInformationMessage('DepTrack: CSV exported'))
-    .catch(e=>outputChannel.appendLine(`[CSV] error: ${e.message}`));
+function exportCsv() {
+  if (!latestPayload) return;
+  try {
+    const ws = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    let csv = 'Category,Name,Details\n';
+    Object.entries(latestPayload.outdated   || {}).forEach(([p,i]) => { csv += `Outdated,${p},"${i.current}→${i.latest}"\n`; });
+    Object.entries(latestPayload.vuln       || {}).forEach(([p,list]) => list.forEach(v => { csv+=`Vulnerability,${p},"${v.severity}"\n`; }));
+    (latestPayload.licenseIssues            || []).forEach(x => { csv += `License,${x.pkg},"${x.licenses.join(',')}"\n`; });
+    (latestPayload.eslintDetails            || []).forEach(e => { csv += `ESLint,${e.file}:${e.line},"${e.rule}: ${e.message}"\n`; });
+    (latestPayload.duplicationDetails       || []).forEach(d => { csv += `Duplication,${d.fileA}:${d.lineA},${d.fileB}:${d.lineB}\n`; });
+    (latestPayload.complexity               || []).forEach(c => { csv += `Complexity,${c.path},"${c.aggregate.cyclomatic}"\n`; });
+    (latestPayload.secrets                  || []).forEach(s => { csv += `Secret,${s.file}:${s.line},${s.rule}\n`; });
+    Object.entries(latestPayload.depGraph    || {}).forEach(([n,i]) => { csv += `Dependency,${n},"${i.version}"\n`; });
+    (latestPayload.chatHistory              || []).forEach(c => { const t = c.text.replace(/"/g,'""'); csv+=`Chat,${c.from},"${t}"\n`; });
+    (latestPayload.testFiles                || []).forEach(f => { csv += `TestFile,,${f}\n`; });
+    const uri = vscode.Uri.file(path.join(ws,'deptrack-report.csv'));
+    vscode.workspace.fs.writeFile(uri, Buffer.from(csv,'utf8'));
+  } catch (e) {
+    logError('exportCsv', e);
+  }
 }
 
-function exportPdf(){
-  if(!latestPayload) return;
-  const ws  = vscode.workspace.workspaceFolders[0].uri.fsPath;
-  const out = path.join(ws,'deptrack-report.pdf');
-  const doc = new PDFDocument({ margin:40 });
-  doc.pipe(fs.createWriteStream(out));
-
-  const section = t=>doc.fontSize(16).text(t,{underline:true}).moveDown(0.5);
-  const item    = t=>doc.fontSize(12).text(`• ${t}`).moveDown(0.2);
-
-  doc.fontSize(20).text('DepTrack Report').moveDown(1);
-  section('Outdated Packages');
-  Object.entries(latestPayload.outdated).forEach(([p,i])=>item(`${p}: ${i.current} → ${i.latest}`));
-  section('Vulnerabilities');
-  Object.entries(latestPayload.vuln).forEach(([p,v])=>item(`${p}: [${v.severity}] ${v.title}`));
-  section('Fix Suggestions');
-  latestPayload.suggestions.forEach(s=>item(`[${s.category}] ${s.suggestion}`));
-  section('License Issues');
-  latestPayload.licenseIssues.forEach(x=>item(`${x.pkg}: ${x.licenses.join(', ')} → ${x.issues.join('; ')}`));
-  section('ESLint Issues');
-  Object.entries(latestPayload.eslintCounts).forEach(([f,c])=>item(`${f}: ${c} issues`));
-  section('Code Duplication');
-  latestPayload.duplicationDetails.forEach(d=>item(`${d.fileA}:${d.lineA} ↔ ${d.fileB}:${d.lineB}`));
-  section('Secret Findings');
-  latestPayload.secrets.forEach(s=>item(`${s.file}:${s.line} [${s.rule}]`));
-  section('Complexity');
-  latestPayload.complexity.forEach(r=>item(`${r.path}: cyclomatic ${r.aggregate?.cyclomatic}`));
-  section('Dependency Graph');
-  Object.entries(latestPayload.depGraph).forEach(([n,i])=>item(`${n}@${i.version}`));
-  section('Sonar Quality Gate');
-  item(`Status: ${latestPayload.sonar.qualityGate}`);
-  section('Chat History');
-  latestPayload.chatHistory.forEach(c=>item(`${c.from}: ${c.text}`));
-
-  doc.end();
-  doc.on('finish',()=>vscode.window.showInformationMessage(`DepTrack: PDF exported to ${out}`));
+function exportPdf() {
+  if (!latestPayload) return;
+  try {
+    const ws  = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    const out = path.join(ws,'deptrack-report.pdf');
+    const doc = new PDFDocument({ margin: 40 });
+    doc.pipe(fs.createWriteStream(out));
+    doc.fontSize(20).text('DepTrack Report').moveDown(1);
+    const section = t => doc.fontSize(16).text(t,{ underline:true }).moveDown(0.5);
+    const item    = t => doc.fontSize(12).text(`• ${t}`).moveDown(0.2);
+    section('Outdated Packages');
+    Object.entries(latestPayload.outdated || {}).forEach(([p,i]) => item(`${p}: ${i.current}→${i.latest}`));
+    section('Vulnerabilities');
+    Object.entries(latestPayload.vuln || {}).forEach(([p,list]) => list.forEach(v => item(`${p}: [${v.severity}] ${v.title}`)));
+    if (latestPayload.vulnError) item(`Error: ${latestPayload.vulnError}`);
+    section('Forbidden Licenses');
+    (latestPayload.licenseIssues || []).forEach(x => item(`${x.pkg}: ${x.licenses.join(', ')}`));
+    section('ESLint Issues');
+    (latestPayload.eslintDetails || []).forEach(e => item(`${e.file}:${e.line}[${e.rule}] ${e.message}`));
+    section('Sonar Summary');
+    item(latestPayload.sonarResult.summary);
+    section('Sonar Metrics');
+    const m = latestPayload.sonarResult.metrics || {};
+    item(`Bugs: ${m.bugs}`);
+    item(`Vulnerabilities: ${m.vulnerabilities}`);
+    item(`Code Smells: ${m.code_smells}`);
+    item(`Coverage: ${m.coverage}`);
+    item(`Duplication %: ${m.duplicated_lines_density}`);
+    section('Code Duplication');
+    (latestPayload.duplicationDetails || []).forEach(d => item(`${d.fileA}:${d.lineA} ↔ ${d.fileB}:${d.lineB}`));
+    section('Secrets');
+    (latestPayload.secrets || []).forEach(s => item(`${s.file}:${s.line}[${s.rule}] ${s.match}`));
+    section('Test Files');
+    (latestPayload.testFiles || []).forEach(f => item(f));
+    section('Chat History');
+    (latestPayload.chatHistory || []).forEach(c => item(`${c.from}: ${c.text}`));
+    doc.end();
+  } catch (e) {
+    logError('exportPdf', e);
+  }
 }
 
-function deactivate(){ clearInterval(refreshInterval); }
 module.exports = { activate, deactivate };

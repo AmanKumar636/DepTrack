@@ -5,17 +5,14 @@
       "name": "Run DepTrack Extension",
       "type": "extensionHost",
       "request": "launch",
-      // Don’t stop on entry
-      "stopOnEntry": false,
+      "preLaunchTask": "npm: build",
       "runtimeExecutable": "${execPath}",
-      // Disable both Chat and Git built‑in extensions in the debug host
       "runtimeArgs": [
         "--disable-extension=ms-vscode.chat",
         "--disable-extension=vscode.git"
       ],
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}",
-        "${workspaceFolder}"
+        "--extensionDevelopmentPath=${workspaceFolder}"
       ],
       "outFiles": [
         "${workspaceFolder}/dist/**/*.js"
