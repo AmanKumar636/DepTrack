@@ -13,3 +13,7 @@ yarn-error.log*
 # OS files
 .DS_Store
 Thumbs.db
+
+# large auto-generated/build artifacts
+.dependency-check/
+snyk.exe
