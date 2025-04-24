@@ -18,3 +18,4 @@ Thumbs.db
 .dependency-check/
 snyk.exesecret.js
 .scannerwork/
+"snyk.exe" 
