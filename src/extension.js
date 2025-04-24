@@ -533,8 +533,8 @@ async function checkSonar(ws) {
   const cfg = vscode.workspace.getConfiguration();
 
   // VS Code settings → env vars fallback
-  const token      = cfg.get('deptrack.sonar.token')?.trim()        || process.env.SONAR_TOKEN?.trim();
-  const projectKey = cfg.get('deptrack.sonar.projectKey')?.trim()   || process.env.SONAR_PROJECT_KEY?.trim();
+  const token      = cfg.get('deptrack.sonar.token')?.trim()      || process.env.SONAR_TOKEN?.trim();
+  const projectKey = cfg.get('deptrack.sonar.projectKey')?.trim() || process.env.SONAR_PROJECT_KEY?.trim();
   const host       = (cfg.get('deptrack.sonar.hostUrl') ||
                       process.env.SONAR_HOST_URL ||
                       'https://sonarcloud.io').replace(/\/$/, '');
@@ -565,25 +565,25 @@ async function checkSonar(ws) {
     `-Dsonar.host.url=${host}`,
     '-Dsonar.qualitygate.wait=true',
     '-Dsonar.scm.disabled=true',
-    '-Dsonar.sources=.',
-    '-Dsonar.exclusions=**/report/**,**/.scannerwork/**,**/node_modules/**,**/dist/**',
+    '-Dsonar.sources=src',
+    `-Dsonar.exclusions=**/report/**,**/.scannerwork/**,**/node_modules/**,**/dist/**,**/coverage/**,**/*.html,**/.dependency-check/**,**/*.exe`,
     '-Dsonar.scanner.skipSystemTruststore=true'
   ];
 
   try {
     await execP(`"${scanner}" ${props.join(' ')}`, { cwd: ws, maxBuffer: 209715200 });
     summary = '✅ Quality Gate passed';
-  } catch (err) {
-    logError(fn, err);
-    summary = '❌ Sonar scan failed';
+  } catch (_) {
+    // suppress raw error output, just report gate failure
+    summary = '❌ Quality Gate failed';
   }
 
-  // Pull metrics from SonarCloud
+  // Pull metrics from SonarCloud API
   try {
     const metricKeys = ['bugs','vulnerabilities','code_smells','coverage','duplicated_lines_density'].join(',');
     const url = `${host}/api/measures/component?component=${encodeURIComponent(projectKey)}&metricKeys=${metricKeys}`;
     const resp = await axios.get(url, { auth: { username: token, password: '' }, timeout: 10000 });
-    metrics = resp.data.component.measures.reduce((acc,m) => {
+    metrics = resp.data.component.measures.reduce((acc, m) => {
       acc[m.metric] = m.value;
       return acc;
     }, {});
@@ -675,78 +675,95 @@ async function checkDuplication(ws) {
   const fn = 'checkDuplication';
   outputChannel.appendLine('[Duplication] start');
 
-  // Determine jsinspect command
+  // prefer a local jsinspect, else fall back to npx
   const inspector = resolveCmd(ws, 'jsinspect') || 'npx jsinspect';
-  const targetDir = process.platform === 'win32'
-    ? ws.replace(/\\/g, '/')
-    : ws;
 
-  // Use separate --ignore flags for each glob
-  const ignoreGlobs = [
-    'report/**',
-    'node_modules/**',
-    'dist/**',
-    '.scannerwork/**'
+  // run in the workspace root (so paths stay relative), not "C:/…"
+  const targetDir = '.';
+
+  // jsinspect --ignore takes regex patterns
+  const ignorePatterns = [
+    'report/',
+    'node_modules/',
+    'dist/',
+    '\\.scannerwork/',
+    '\\.mocharc\\.js$'
   ];
-  const ignoreFlags = ignoreGlobs.map(g => `--ignore "${g}"`).join(' ');
-  const cmd = `${inspector} --identical --threshold 1 --reporter json ${ignoreFlags} "${targetDir}"`;
+  const ignoreFlags = ignorePatterns
+    .map(rx => `--ignore "${rx}"`)
+    .join(' ');
 
-  // Capture stdout even if jsinspect exits with code 1 (duplicates found)
+  const cmd = `${inspector} --identical --threshold 1 --reporter json ${ignoreFlags} "${targetDir}"`;
   let raw = '';
+
   try {
     outputChannel.appendLine(`[Duplication] running: ${cmd}`);
-    const { stdout } = await execP(cmd, { cwd: ws, maxBuffer: 524288000 });
+    const { stdout } = await execP(cmd, {
+      cwd: ws,
+      maxBuffer: 524288000
+    });
     raw = stdout;
   } catch (e) {
     raw = e.stdout || '';
     if (!raw) {
       logError(fn, e);
-      outputChannel.appendLine('[Duplication] failed');
+      outputChannel.appendLine('[Duplication] failed (no output)');
       outputChannel.appendLine('[Duplication] done');
       return [];
     }
   }
 
-  // Strip out any non-JSON prefixes/suffixes (e.g. error messages)
-  const firstBracket = raw.indexOf('[');
-  const lastBracket = raw.lastIndexOf(']');
-  if (firstBracket === -1 || lastBracket === -1) {
-    outputChannel.appendLine('[Duplication] parse failed (no JSON array)');
+  // if there's no output at all, there were no duplicates
+  if (!raw.trim()) {
+    outputChannel.appendLine('[Duplication] none');
     outputChannel.appendLine('[Duplication] done');
     return [];
   }
-  const jsonText = raw.slice(firstBracket, lastBracket + 1);
 
-  // Parse the JSON output
+  // extract the JSON array
+  const firstBracket = raw.indexOf('[');
+  const lastBracket  = raw.lastIndexOf(']');
+  if (firstBracket === -1 || lastBracket === -1) {
+    outputChannel.appendLine('[Duplication] parse failed (no JSON array)');
+    const preview = raw.slice(0, 300).replace(/\r?\n/g, ' ');
+    outputChannel.appendLine(`[Duplication] raw output: ${preview}...`);
+    outputChannel.appendLine('[Duplication] done');
+    return [];
+  }
+
+  const jsonText = raw.slice(firstBracket, lastBracket + 1);
   let matches;
   try {
     matches = JSON.parse(jsonText);
   } catch (pe) {
     logError(fn, pe);
-    outputChannel.appendLine('[Duplication] parse failed');
+    outputChannel.appendLine('[Duplication] parse failed (invalid JSON)');
     outputChannel.appendLine('[Duplication] done');
     return [];
   }
 
-  // Flatten each match into pairwise entries
+  // flatten the instances into pairwise results
   const res = [];
   matches.forEach(match => {
     const inst = match.instances;
     for (let i = 0; i < inst.length; i++) {
       for (let j = i + 1; j < inst.length; j++) {
         res.push({
-          fileA: inst[i].path, lineA: inst[i].lines[0],
-          fileB: inst[j].path, lineB: inst[j].lines[0]
+          fileA: inst[i].path,
+          lineA: inst[i].lines[0],
+          fileB: inst[j].path,
+          lineB: inst[j].lines[0]
         });
       }
     }
   });
 
-  if (!res.length) outputChannel.appendLine('[Duplication] none');
+  if (!res.length) {
+    outputChannel.appendLine('[Duplication] none');
+  }
   outputChannel.appendLine('[Duplication] done');
   return res;
 }
-
 
 async function handleChat(text) {
   chatHistory.push({ from: 'You', text });
