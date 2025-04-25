@@ -1,4 +1,4 @@
-// eslintTest.js
+// eslint.js
 const PI = 3.14
 
 function compute(r) {

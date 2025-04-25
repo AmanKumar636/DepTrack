@@ -7,7 +7,7 @@
   "engines": {
     "vscode": "^1.88.0"
   },
-  "main": "./src/extension.js",
+  "main": "./src/extension.cjs",
   "activationEvents": [
     "onCommand:Aman.deptrack.openDashboard",
     "onCommand:Aman.deptrack.refresh",
@@ -17,6 +17,7 @@
     "onCommand:Aman.deptrack.exportPDF",
     "onCommand:Aman.deptrack.chat"
   ],
+  "type": "module",
   "contributes": {
     "commands": [
       {
@@ -138,17 +139,29 @@
     "strip-ansi": "^6.0.1"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.1",
+    "@eslint/js": "^9.25.1",
     "@types/jest": "^29.5.14",
-    "@vercel/ncc": "^0.34.0",
+    "@typescript-eslint/eslint-plugin": "^8.31.0",
+    "@typescript-eslint/parser": "^8.31.0",
+    "@vercel/ncc": "^0.38.3",
     "@vscode/test-electron": "^2.5.2",
     "@yarnpkg/lockfile": "^1.1.0",
     "chokidar-cli": "^3.0.0",
     "escomplex": "^2.0.0-alpha",
     "eslint": "^9.25.1",
+    "eslint-config-prettier": "^10.1.2",
+    "eslint-config-scanjs": "^1.0.0-beta4",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-prettier": "^5.2.6",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-security": "^3.0.1",
     "jest": "^29.7.0",
     "jscpd": "^4.0.5",
     "jsinspect": "^0.12.7",
     "plato": "^1.7.0",
+    "prettier": "^3.5.3",
     "ts-jest": "^29.3.2",
     "typhonjs-escomplex": "^0.1.0",
     "vscode": "^1.1.37"

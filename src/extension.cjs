@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const util = require('util');
 const { exec: execCb, execSync } = require('child_process');
-const execP = util.promisify(execCb);
+const execP = util.promisify(require('child_process').exec);
 const axios = require('axios');
 const nodemailer = require('nodemailer');
 const PDFDocument = require('pdfkit');
@@ -11,6 +11,8 @@ const semver = require('semver');
 const stripAnsi = require('strip-ansi').default || require('strip-ansi');
 const { ESLint } = require('eslint');
 const fg = require('fast-glob');
+
+
 
 const patterns = [
   { name: 'AWS Key',    regex: /AKIA[0-9A-Z]{16}/g },
@@ -245,7 +247,6 @@ async function runAllChecks() {
   outputChannel.show(true);
   outputChannel.appendLine('runAllChecks start');
 
-  // Initialize result placeholders
   let outdated = {};
   let vulnPayload = { data: {}, error: null };
   let licenseIssues = [];
@@ -256,52 +257,80 @@ async function runAllChecks() {
   let secrets = [];
   let depGraph = {};
 
-  // 1) Outdated Packages
   outputChannel.appendLine('-> checkOutdated');
-  try { outdated = await checkOutdated(ws); }
-  catch (e) { logError('runAllChecks.checkOutdated', e); }
+  try {
+    outdated = await checkOutdated(ws);
+  } catch (e) {
+    logError('runAllChecks.checkOutdated', e);
+  }
 
-  // 2) Vulnerabilities
   outputChannel.appendLine('-> checkVuln');
-  try { vulnPayload = await checkVuln(ws); }
-  catch (e) { logError('runAllChecks.checkVuln', e); }
+  try {
+    vulnPayload = await checkVuln(ws);
+  } catch (e) {
+    logError('runAllChecks.checkVuln', e);
+  }
 
-  // 3) License Issues
   outputChannel.appendLine('-> checkLicenses');
-  try { licenseIssues = await checkLicenses(ws); }
-  catch (e) { logError('runAllChecks.checkLicenses', e); }
+  try {
+    licenseIssues = await checkLicenses(ws);
+  } catch (e) {
+    logError('runAllChecks.checkLicenses', e);
+  }
 
-  // 4) ESLint
   outputChannel.appendLine('-> checkESLint');
-  try { eslintDetails = await checkESLint(ws); }
-  catch (e) { logError('runAllChecks.checkESLint', e); }
+  try {
+    eslintDetails = await checkESLint(ws);
+  } catch (e) {
+    logError('runAllChecks.checkESLint', e);
+  }
 
-  // 5) Sonar
   outputChannel.appendLine('-> checkSonar');
-  try { sonarResult = await checkSonar(ws); }
-  catch (e) { logError('runAllChecks.checkSonar', e); }
+  try {
+    sonarResult = await checkSonar(ws);
+  } catch (e) {
+    logError('runAllChecks.checkSonar', e);
+  }
 
-  // 6) Complexity
   outputChannel.appendLine('-> checkComplexity');
-  try { complexity = await checkComplexity(ws); }
-  catch (e) { logError('runAllChecks.checkComplexity', e); }
+  try {
+    complexity = await checkComplexity(ws);
+  } catch (e) {
+    logError('runAllChecks.checkComplexity', e);
+  }
 
-  // 7) Duplication
   outputChannel.appendLine('-> checkDuplication');
-  try { duplicationDetails = await checkDuplication(ws); }
-  catch (e) { logError('runAllChecks.checkDuplication', e); }
+  try {
+    duplicationDetails = await checkDuplication(ws);
+  } catch (e) {
+    logError('runAllChecks.checkDuplication', e);
+  }
 
-  // 8) Secret Scan
   outputChannel.appendLine('-> scanSecrets');
-  try { secrets = await scanSecrets(ws); }
-  catch (e) { logError('runAllChecks.scanSecrets', e); }
+  try {
+    secrets = await scanSecrets(ws);
+  } catch (e) {
+    logError('runAllChecks.scanSecrets', e);
+  }
 
-  // 9) Dependency Graph
   outputChannel.appendLine('-> checkDepGraph');
-  try { depGraph = await checkDepGraph(ws); }
-  catch (e) { logError('runAllChecks.checkDepGraph', e); }
+  try {
+    depGraph = await checkDepGraph(ws);
+  } catch (e) {
+    logError('runAllChecks.checkDepGraph', e);
+  }
 
-  // Store latest payload for exports and dashboard
+  // build suggested fixes once all data is available
+  const suggestedFixes = await getSuggestedFixes({
+    outdated,
+    vuln: vulnPayload.data,
+    licenseIssues,
+    eslintDetails,
+    duplicationDetails,
+    secrets
+  });
+
+
   latestPayload = {
     outdated,
     vuln: vulnPayload.data,
@@ -313,20 +342,19 @@ async function runAllChecks() {
     duplicationDetails,
     secrets,
     depGraph,
-    chatHistory
+    chatHistory,
+    suggestedFixes
   };
 
-  // Send data to the dashboard webview
-  if (panel?.webview) {
-    panel.webview.postMessage({
-      command: 'updateData',
-      payload: latestPayload
-    });
-  }
+  panel?.webview.postMessage({
+    command: 'updateData',
+    payload: latestPayload
+  });
 
   outputChannel.appendLine('runAllChecks done');
   isScanning = false;
 }
+
 // Updated checkOutdated: treats npm outdated exit-code 1 as normal, cleans up logging
 async function checkOutdated(ws) {
   const fn = 'checkOutdated';
@@ -463,6 +491,7 @@ async function checkVuln(ws) {
   return { data: res, error: vulnError };
 }
 
+
 async function checkLicenses(ws) {
   const fn = 'checkLicenses';
   outputChannel.appendLine('[License] start');
@@ -486,47 +515,105 @@ async function checkLicenses(ws) {
   return res;
 }
 
+// ─── checkESLint (shell-out to ESLint CLI) ───────────────────────────────────
 async function checkESLint(ws) {
   const fn = 'checkESLint';
   outputChannel.appendLine('[ESLint] start');
 
-  // Only lint our src folder
-  const patterns = ['src/**/*.{js,ts}'];
-  let res = [];
+  // 1) Glob patterns and ignore folders
+  const patterns = ['**/*.{js,jsx,ts,tsx}'];
+  const ignore   = ['node_modules/**', 'dist/**', 'report/**', 'coverage/**', 'deptrack/**', 'media/**'];
+  outputChannel.appendLine(`[ESLint] glob patterns: ${patterns}`);
+  outputChannel.appendLine(`[ESLint] ignores: ${ignore}`);
 
+  let files;
   try {
-    const eslint = new ESLint({
-      cwd: ws,
-      // Merge in our rule override. Other config files (eslintrc, ignore) are respected.
-      overrideConfig: {
-        rules: {
-          'semi': ['error', 'always']
-        }
-      }
-    });
-
-    const results = await eslint.lintFiles(patterns);
-    for (const r of results) {
-      const relativePath = path.relative(ws, r.filePath);
-      for (const m of r.messages) {
-        res.push({
-          file:    relativePath,
-          line:    m.line,
-          rule:    m.ruleId,
-          message: m.message
-        });
-      }
-    }
+    files = await fg(patterns, { cwd: ws, onlyFiles: true, absolute: true, ignore });
   } catch (e) {
     logError(fn, e);
+    outputChannel.appendLine('[ESLint] error resolving files');
+    outputChannel.appendLine('[ESLint] done');
+    return [];
   }
 
-  if (!res.length) {
-    outputChannel.appendLine('[ESLint] none detected');
+  if (!files.length) {
+    outputChannel.appendLine('[ESLint] no files to scan');
+    outputChannel.appendLine('[ESLint] done');
+    return [];
   }
+  files.forEach(f => outputChannel.appendLine(`[ESLint] will lint: ${path.relative(ws, f)}`));
+
+  // 2) Locate ESLint binary
+  const binName   = process.platform === 'win32' ? 'eslint.cmd' : 'eslint';
+  const localBin  = path.join(ws, 'node_modules', '.bin', binName);
+  const eslintBin = fs.existsSync(localBin) ? `"${localBin}"` : 'eslint';
+  outputChannel.appendLine(`[ESLint] using binary: ${eslintBin}`);
+
+  // 3) Build and run CLI command pointing at our CJS config
+  const configFile = path.join(ws, 'eslint.config.cjs');
+  const args = [
+    `-c "${configFile}"`,   // CommonJS config
+    '-f json',
+    ...files.map(f => `"${f}"`)
+  ].join(' ');
+  const cmd = `${eslintBin} ${args}`;
+  outputChannel.appendLine(`[ESLint] running: ${cmd}`);
+
+  let raw = '';
+  try {
+    const { stdout, stderr } = await execP(cmd, { cwd: ws, maxBuffer: 20 * 1024 * 1024 });
+    raw = (stdout || '').trim() || (stderr || '').trim();
+  } catch (e) {
+    raw = (e.stdout || '').trim() || (e.stderr || '').trim();
+  }
+
+  if (!raw) {
+    outputChannel.appendLine('[ESLint] no output received');
+    outputChannel.appendLine('[ESLint] done');
+    return [];
+  }
+
+  // 4) Extract JSON and parse
+  const first = raw.indexOf('[');
+  const last  = raw.lastIndexOf(']');
+  const jsonText = first >= 0 && last > first ? raw.slice(first, last + 1) : '';
+  if (!jsonText) {
+    outputChannel.appendLine('[ESLint] no valid JSON block found');
+    outputChannel.appendLine('[ESLint] done');
+    return [];
+  }
+
+  let results;
+  try {
+    results = JSON.parse(jsonText);
+  } catch (pe) {
+    logError(fn, pe);
+    outputChannel.appendLine('[ESLint] JSON parse failed');
+    outputChannel.appendLine('[ESLint] done');
+    return [];
+  }
+
+  // 5) Flatten results for the dashboard
+  const res = [];
+  for (const fileResult of results) {
+    const rel = path.relative(ws, fileResult.filePath);
+    if (/^(node_modules|dist|report|coverage|deptrack)[\/\\]/.test(rel)) continue;
+    outputChannel.appendLine(`[ESLint] checked: ${rel}, issues: ${fileResult.messages.length}`);
+    for (const msg of fileResult.messages) {
+      res.push({
+        file:    rel,
+        line:    msg.line,
+        rule:    msg.ruleId,
+        message: msg.message
+      });
+    }
+  }
+
+  if (!res.length) outputChannel.appendLine('[ESLint] none detected');
   outputChannel.appendLine('[ESLint] done');
   return res;
 }
+
 
 async function checkSonar(ws) {
   const fn = 'checkSonar';
@@ -565,11 +652,17 @@ async function checkSonar(ws) {
     `-Dsonar.host.url=${host}`,
     '-Dsonar.qualitygate.wait=true',
     '-Dsonar.scm.disabled=true',
+    // Only scan your actual source folder
     '-Dsonar.sources=src',
-    `-Dsonar.exclusions=**/report/**,**/.scannerwork/**,**/node_modules/**,**/dist/**,**/coverage/**,**/*.html,**/.dependency-check/**,**/*.exe`,
+    // Exclude reports, coverage, HTML, fixtures, node_modules, etc.
+    `-Dsonar.exclusions=**/report/**,**/coverage/**,**/*.html,**/fixtures/**,**/.scannerwork/**,**/node_modules/**,**/dist/**,**/.dependency-check/**,**/*.exe`,
+    // Raise CPD threshold so small snippets are skipped
+    '-Dsonar.cpd.javascript.minimumTokens=50',
+    // Use 4 threads in parallel
+    '-Dsonar.threads=4',
     '-Dsonar.scanner.skipSystemTruststore=true'
   ];
-
+  
   try {
     await execP(`"${scanner}" ${props.join(' ')}`, { cwd: ws, maxBuffer: 209715200 });
     summary = '✅ Quality Gate passed';
@@ -671,96 +764,94 @@ async function checkComplexity(ws) {
   }
 }
 	
+// ─── DUPLICATION SCAN ───────────────────────────────────────────────────────────
+
+
 async function checkDuplication(ws) {
   const fn = 'checkDuplication';
   outputChannel.appendLine('[Duplication] start');
 
-  // prefer a local jsinspect, else fall back to npx
-  const inspector = resolveCmd(ws, 'jsinspect') || 'npx jsinspect';
+  // 1) Normalize to forward-slashes
+  const projectRoot = ws.replace(/\\/g, '/');
 
-  // run in the workspace root (so paths stay relative), not "C:/…"
-  const targetDir = '.';
-
-  // jsinspect --ignore takes regex patterns
-  const ignorePatterns = [
-    'report/',
-    'node_modules/',
-    'dist/',
-    '\\.scannerwork/',
-    '\\.mocharc\\.js$'
+  // 2) Build glob patterns against that
+  const patterns = [
+    `${projectRoot}/*.js`,
+    `${projectRoot}/*.ts`,
+    `${projectRoot}/src/**/*.js`,
+    `${projectRoot}/src/**/*.ts`
   ];
-  const ignoreFlags = ignorePatterns
-    .map(rx => `--ignore "${rx}"`)
-    .join(' ');
+  outputChannel.appendLine(`[Duplication] glob patterns: ${patterns.join(', ')}`);
 
-  const cmd = `${inspector} --identical --threshold 1 --reporter json ${ignoreFlags} "${targetDir}"`;
+  let files;
+  try {
+    files = await fg(patterns, { absolute: true, onlyFiles: true });
+  } catch (e) {
+    logError(fn, e);
+    outputChannel.appendLine('[Duplication] error resolving files');
+    outputChannel.appendLine('[Duplication] done');
+    return [];
+  }
+
+  if (!files.length) {
+    outputChannel.appendLine('[Duplication] no files to scan');
+    outputChannel.appendLine('[Duplication] done');
+    return [];
+  }
+
+  // 3) Log each file
+  files.forEach(f => {
+    const rel = path.relative(ws, f);
+    outputChannel.appendLine(`[Duplication] checking file: ${rel}`);
+  });
+
+  // 4) Run jsinspect
+  const inspector = resolveCmd(ws, 'jsinspect') || 'npx jsinspect';
+  const threshold = 3;
+  const fileArgs  = files.map(f => `"${f}"`).join(' ');
+  const cmd       = `${inspector} --identical --threshold ${threshold} --reporter json ${fileArgs}`;
+
   let raw = '';
-
   try {
     outputChannel.appendLine(`[Duplication] running: ${cmd}`);
-    const { stdout } = await execP(cmd, {
-      cwd: ws,
-      maxBuffer: 524288000
-    });
-    raw = stdout;
+    const { stdout, stderr } = await execP(cmd, { cwd: ws, maxBuffer: 524288000 });
+    raw = (stdout || '').trim() || (stderr || '').trim();
   } catch (e) {
-    raw = e.stdout || '';
-    if (!raw) {
-      logError(fn, e);
-      outputChannel.appendLine('[Duplication] failed (no output)');
-      outputChannel.appendLine('[Duplication] done');
-      return [];
-    }
+    raw = (e.stdout || '').trim() || (e.stderr || '').trim();
   }
 
-  // if there's no output at all, there were no duplicates
-  if (!raw.trim()) {
-    outputChannel.appendLine('[Duplication] none');
-    outputChannel.appendLine('[Duplication] done');
-    return [];
-  }
+  outputChannel.appendLine(`[Duplication] raw output:\n${raw}`);
 
-  // extract the JSON array
-  const firstBracket = raw.indexOf('[');
-  const lastBracket  = raw.lastIndexOf(']');
-  if (firstBracket === -1 || lastBracket === -1) {
-    outputChannel.appendLine('[Duplication] parse failed (no JSON array)');
-    const preview = raw.slice(0, 300).replace(/\r?\n/g, ' ');
-    outputChannel.appendLine(`[Duplication] raw output: ${preview}...`);
-    outputChannel.appendLine('[Duplication] done');
-    return [];
-  }
-
-  const jsonText = raw.slice(firstBracket, lastBracket + 1);
+  // 5) Parse JSON
+  const idx      = raw.indexOf('[');
+  const jsonText = idx >= 0 ? raw.slice(idx) : raw;
   let matches;
   try {
     matches = JSON.parse(jsonText);
   } catch (pe) {
     logError(fn, pe);
-    outputChannel.appendLine('[Duplication] parse failed (invalid JSON)');
+    outputChannel.appendLine('[Duplication] parse failed');
     outputChannel.appendLine('[Duplication] done');
     return [];
   }
 
-  // flatten the instances into pairwise results
+  // 6) Format results
   const res = [];
-  matches.forEach(match => {
-    const inst = match.instances;
+  for (const m of matches) {
+    const inst = m.instances || [];
     for (let i = 0; i < inst.length; i++) {
       for (let j = i + 1; j < inst.length; j++) {
         res.push({
-          fileA: inst[i].path,
+          fileA: path.relative(ws, inst[i].path),
           lineA: inst[i].lines[0],
-          fileB: inst[j].path,
+          fileB: path.relative(ws, inst[j].path),
           lineB: inst[j].lines[0]
         });
       }
     }
-  });
-
-  if (!res.length) {
-    outputChannel.appendLine('[Duplication] none');
   }
+
+  if (!res.length) outputChannel.appendLine('[Duplication] none');
   outputChannel.appendLine('[Duplication] done');
   return res;
 }
@@ -790,6 +881,85 @@ async function handleChat(text) {
   panel && panel.webview.postMessage({ command: 'chatResponse', payload: { text: reply } });
 }
 
+async function getSuggestedFixes({
+  outdated = {},
+  vuln = {},
+  licenseIssues = [],
+  eslintDetails = [],
+  duplicationDetails = [],
+  secrets = []
+}) {
+  const fixes = [];
+
+  // 1) Outdated packages
+  for (const [pkg, info] of Object.entries(outdated)) {
+    fixes.push({
+      pkg,
+      fix: `Update to ${info.latest}`
+    });
+  }
+
+  // 2) Vulnerabilities
+  for (const [pkg, list] of Object.entries(vuln)) {
+    list.forEach(v => {
+      // if Snyk already suggests "patch" or "upgrade", use that; otherwise offer generic advice
+      const suggestion = /upgrade to ([\d.]+)/i.exec(v.title)
+        ? `Upgrade to ${RegExp.$1}`
+        : v.title.startsWith('Insecure')
+          ? `Review & patch vulnerability`
+          : `Review vulnerability: "${v.title}"`;
+      fixes.push({ pkg, fix: suggestion });
+    });
+  }
+
+  // 3) Forbidden‐license issues
+  licenseIssues.forEach(x => {
+    fixes.push({
+      pkg: x.pkg,
+      fix: `Consider replacing or upgrading (forbidden: ${x.licenses.join(', ')})`
+    });
+  });
+
+  // 4) ESLint issues
+  // Group by file: if any errors exist, recommend full auto‐fix; else suggest specific rule
+  const eslintByFile = eslintDetails.reduce((acc, e) => {
+    (acc[e.file] ||= []).push(e);
+    return acc;
+  }, {});
+  for (const [file, msgs] of Object.entries(eslintByFile)) {
+    fixes.push({
+      pkg: file,
+      fix: msgs.some(m => m.rule && m.rule !== 'semi')
+        ? `Run \`eslint --fix "${file}"\``
+        : `Add missing semicolons (rule: semi)`
+    });
+  }
+
+  // 5) Secret leaks
+  secrets.forEach(s => {
+    fixes.push({
+      pkg: s.file,
+      fix: `Remove hard‐coded ${s.rule} and inject via secure env variable`
+    });
+  });
+
+  // 6) Code duplication
+  // For each pair, suggest function extraction
+  duplicationDetails.forEach(d => {
+    fixes.push({
+      pkg: `${d.fileA} & ${d.fileB}`,
+      fix: `Extract common logic at lines ${d.lineA}/${d.lineB} into shared function`
+    });
+  });
+
+  // 7) (Optional) Complexity
+  // If you want to flag super‐complex files, e.g. cyclomatic > 10, you could:
+  // complexity.forEach(c => { ... });
+
+  return fixes;
+}
+
+
 async function runHealthCheck() {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) return;
@@ -804,6 +974,7 @@ async function runHealthCheck() {
     logError('runHealthCheck', e);
   }
 }
+
 
 async function sendEmailNotification(subject, text, overrideTo) {
   const cfg = vscode.workspace.getConfiguration('deptrack.email');
