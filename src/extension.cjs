@@ -58,6 +58,22 @@ let latestPayload = {
   suggestedFixes: []
 };
 
+
+let latestPayload = {
+  outdated: {},
+  vuln: {},
+  vulnError: null,
+  licenseIssues: [],
+  eslintDetails: [],
+  sonarResult: {},
+  complexity: [],
+  duplicationDetails: [],
+  secrets: [],
+  depGraph: {},
+  chatHistory: [],
+  suggestedFixes: []
+};
+
 function logError(fnName, err) {
   const msg = stripAnsi(err.stack || err.message || err);
   outputChannel && outputChannel.appendLine(`[${fnName}] ERROR: ${msg}`);
@@ -211,6 +227,7 @@ async function activate(context) {
 
   // 2) Allow the user to optionally store an OpenAI key (chat will fall back to HF)
   context.subscriptions.push(
+<<<<<<< HEAD
     vscode.commands.registerCommand('Aman.deptrack.setOpenAIKey', async () => {
       const key = await vscode.window.showInputBox({
         prompt: 'Enter your OpenAI API key (optional)',
@@ -222,6 +239,54 @@ async function activate(context) {
         vscode.window.showInformationMessage('✅ OpenAI key saved');
       } else {
         vscode.window.showInformationMessage('Chat will use free Hugging Face API');
+=======
+    vscode.commands.registerCommand('Aman.deptrack.openDashboard', () => {
+      outputChannel.appendLine('command openDashboard');
+      if (!panel) {
+        panel = vscode.window.createWebviewPanel(
+          'deptrackDashboard',
+          'DepTrack Dashboard',
+          vscode.ViewColumn.One,
+          { enableScripts: true, localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, 'src'))] }
+        );
+        panel.webview.html = fs.readFileSync(path.join(context.extensionPath, 'src', 'dashboard.html'), 'utf8');
+panel.webview.onDidReceiveMessage(msg => {
+  switch (msg.command) {
+    case 'refreshOutdated':
+      runOutdated();
+      break;
+    case 'refreshVuln':
+      runVuln();
+      break;
+    case 'refreshLicense':
+      runLicenses();
+      break;
+    case 'refreshEslint':
+      runESLint();
+      break;
+    case 'refreshDuplication':
+      runDuplication();
+      break;
+    case 'refreshComplexity':
+      runComplexity();
+      break;
+    case 'refreshSecret':
+      runSecrets();
+      break;
+    case 'refreshDepgraph':
+      runDepGraph();
+      break;
+    case 'refreshFixes':
+      runFixes();
+      break;
+    case 'refreshSonar':
+      runSonar();
+      break;
+  }
+});
+
+        panel.onDidDispose(() => { panel = null; }, null, context.subscriptions);
+>>>>>>> 3fe54b9 (Dashboard updated)
       }
     })
   );
@@ -284,6 +349,7 @@ async function activate(context) {
     })
   );
 
+<<<<<<< HEAD
   // 5) Register other commands (unchanged)
   context.subscriptions.push(
     vscode.commands.registerCommand('Aman.deptrack.refresh', () =>
@@ -299,6 +365,15 @@ async function activate(context) {
         panel.webview.postMessage({ command: 'sendCsvReportEmail' })
       )
     )
+=======
+  // Other commands (sendEmail, exportCSV, exportPDF, chat)
+  context.subscriptions.push(
+
+    vscode.commands.registerCommand('Aman.deptrack.sendEmail', args => sendEmailNotification('DepTrack Alert', 'See report.', args)),
+    vscode.commands.registerCommand('Aman.deptrack.exportCSV', exportCsv),
+    vscode.commands.registerCommand('Aman.deptrack.exportPDF', exportPdf),
+    vscode.commands.registerCommand('Aman.deptrack.chat', args => handleChat(args))
+>>>>>>> 3fe54b9 (Dashboard updated)
   );
 
   // 6) Finally, launch the dashboard and log completion
@@ -308,6 +383,7 @@ async function activate(context) {
     .catch(err => outputChannel.appendLine('activate error: ' + err.message));
 }
 
+<<<<<<< HEAD
 
 function deactivate() {
   panel = null;
@@ -326,6 +402,19 @@ async function getFreeChatResponse(prompt) {
   });
   if (!res.ok) {
     throw new Error(`HF API error: ${res.statusText}`);
+=======
+async function onWebviewMessage(msg) {
+  outputChannel.appendLine(`onWebviewMessage ${msg.command}`);
+  switch (msg.command) {
+    case 'refresh': return runAllChecks();
+    case 'scanView': return runAllChecks();
+    case 'scanAll': return runAllChecks();
+    case 'sendEmail': return sendEmailNotification('DepTrack Alert', 'See report.', msg.email);
+    case 'exportCSV': return exportCsv();
+    case 'exportPDF': return exportPdf();
+    case 'chat': return handleChat(msg.text);
+    default: outputChannel.appendLine(`[onWebviewMessage] unknown: ${msg.command}`);
+>>>>>>> 3fe54b9 (Dashboard updated)
   }
   const json = await res.json();
   // DialoGPT returns an array of possible generations; pick the first:
@@ -1311,7 +1400,10 @@ async function getSuggestedFixes({
 }
 
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 3fe54b9 (Dashboard updated)
 
 let webviewPanel; // you’ll need to set this when you create your WebviewPanel
 

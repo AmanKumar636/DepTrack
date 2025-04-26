@@ -23,6 +23,7 @@
     #viewSelect,#scanView,#scanAll{padding:0.5rem;border-radius:var(--radius);border:none;background:var(--card-bg);color:var(--text-light);cursor:pointer}
     #viewSelect:hover,#scanView:hover,#scanAll:hover{background:rgba(255,255,255,0.1)}
     #viewSelect option{background:var(--card-bg);color:var(--text-light)}
+<<<<<<< HEAD
     #chatbotToggle {
   display: flex;
   align-items: center;
@@ -42,6 +43,9 @@
 
 	
 	section#cards{flex:1;display:flex;flex-wrap:wrap;gap:var(--gap);padding:var(--gap);overflow:auto;background:var(--bg-dark);   grid-auto-rows: 350px;}
+=======
+    section#cards{flex:1;display:flex;flex-wrap:wrap;gap:var(--gap);padding:var(--gap);overflow:auto;background:var(--bg-dark);   grid-auto-rows: 350px;}
+>>>>>>> 3fe54b9 (Dashboard updated)
     .card{background:var(--card-bg);border-radius:var(--radius);box-shadow:0 4px 12px var(--shadow);flex:1 1 calc(33% - var(--gap));min-width:260px;display:flex;flex-direction:column;transition:transform .2s;  height: 50%;}
     .card:hover{transform:translateY(-6px)}
       .card .content {
@@ -89,6 +93,7 @@
       <button id="sendInputEmail">Send</button>
     </div>
     <button id="refresh" class="active">🔄 Refresh<span id="spinner" class="spinner">⏳</span></button>
+<<<<<<< HEAD
     <button id="email">📨 Email Developer<span id="emailSpinner" class="spinner">⏳</span></button>
 	<button id="sendReportBtn">📝 Send PDF Report<span id="emailSpinner" class="spinner">⏳</span></button>
 	<button id="sendCsvBtn">📊 Send CSV Report<span id="emailSpinner" class="spinner">⏳</span></button>
@@ -97,6 +102,11 @@
     <button id="pdf">📕 Export PDF<span id="pdfSpinner" class="spinner">⏳</span></button>
 <button id="chatbotToggle">🤖 Chatbot</button>
 
+=======
+    <button id="email">📨 Email Alert<span id="emailSpinner" class="spinner">⏳</span></button>
+    <button id="csv">📊 Export CSV<span id="csvSpinner" class="spinner">⏳</span></button>
+    <button id="pdf">📕 Export PDF<span id="pdfSpinner" class="spinner">⏳</span></button>
+>>>>>>> 3fe54b9 (Dashboard updated)
   </aside>
   <main id="main">
     <header id="header">Welcome</header>
@@ -266,6 +276,7 @@
     function appendMessage(from,text,time){const chatCtr=document.getElementById('chatContainer');const div=document.createElement('div');div.className='message '+(from==='user'?'user':'bot');const content=document.createElement('div');content.textContent=text;const timestamp=document.createElement('div');timestamp.className='timestamp';timestamp.textContent=time;div.appendChild(content);div.appendChild(timestamp);chatCtr.appendChild(div);chatCtr.scrollTop=chatCtr.scrollHeight;}
     document.getElementById('refresh').addEventListener('click',()=>{console.log('Refreshing all');healthMode=false;setLoading(true);vscode.postMessage({command:'refresh'});});
     document.getElementById('email').addEventListener('click',()=>{emailSpinner.classList.add('spin');vscode.postMessage({command:'sendEmail'});setTimeout(()=>emailSpinner.classList.remove('spin'),2000);});
+<<<<<<< HEAD
  document.getElementById('sendReportBtn').addEventListener('click', () => {
     vscode.postMessage({ command: 'sendReportEmail' });
   });  
@@ -291,6 +302,11 @@ document.getElementById('chatbotToggle').addEventListener('click', () => {
   }
 });
 
+=======
+    document.getElementById('csv').addEventListener('click',()=>{csvSpinner.classList.add('spin');vscode.postMessage({command:'exportCSV'});setTimeout(()=>csvSpinner.classList.remove('spin'),2000);});
+    document.getElementById('pdf').addEventListener('click',()=>{pdfSpinner.classList.add('spin');vscode.postMessage({command:'exportPDF'});setTimeout(()=>pdfSpinner.classList.remove('spin'),2000);});
+    document.getElementById('sendInputEmail').addEventListener('click',()=>{const i=document.getElementById('emailInput');if(i.checkValidity())vscode.postMessage({command:'sendEmail',email:i.value});});
+>>>>>>> 3fe54b9 (Dashboard updated)
     document.querySelectorAll('.card-refresh').forEach(btn => {
   btn.addEventListener('click', () => {
     const view = btn.dataset.view;
@@ -302,6 +318,7 @@ document.getElementById('chatbotToggle').addEventListener('click', () => {
   });
 });
 
+<<<<<<< HEAD
 document.querySelectorAll('.card-stop').forEach(btn => {
   btn.addEventListener('click', () => {
     const view = btn.dataset.view; // e.g. 'outdated'
@@ -315,6 +332,9 @@ function capitalize(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+=======
+    document.querySelectorAll('.card-stop').forEach(btn=>{btn.addEventListener('click',()=>{const sp=btn.parentElement.querySelector('.spinner');sp.classList.remove('spin');});});
+>>>>>>> 3fe54b9 (Dashboard updated)
     document.querySelectorAll('.card-delete').forEach(btn=>{btn.addEventListener('click',()=>{document.getElementById('logOutput').textContent='';document.getElementById('logStatus').className='status-dot';});});
     document.getElementById('sendChat').addEventListener('click',()=>{const t=document.getElementById('chatInput').value.trim();if(t){const time=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});appendMessage('user',t,time);document.getElementById('chatInput').value='';vscode.postMessage({command:'chat',text:t});}});
     document.getElementById('chatInput').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('sendChat').click();});
@@ -334,6 +354,7 @@ function capitalize(s) {
     document.getElementById('logOutput').textContent = L.join('\n');
     return;
   }
+<<<<<<< HEAD
   
    if (e.data.command === 'emailStatus') {
     emailSpinner.classList.remove('spin');
@@ -341,14 +362,19 @@ function capitalize(s) {
     else console.error('Email failed:', e.data.error);
   }
   
+=======
+>>>>>>> 3fe54b9 (Dashboard updated)
   if (m.command === 'updateData' && !healthMode) {
     setLoading(false);
     const d = m.payload;
 
+<<<<<<< HEAD
     if (m.command === 'chatResponse') {
       const time = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
       appendMessage('bot', m.text, time);
     }
+=======
+>>>>>>> 3fe54b9 (Dashboard updated)
     const outTb = document.querySelector('#outdatedTable tbody');
     outTb.innerHTML = '';
     Object.entries(d.outdated || {}).forEach(([pkg, info]) => {
@@ -436,6 +462,7 @@ function capitalize(s) {
       }
     });
 
+<<<<<<< HEAD
    
   const outEl = document.getElementById('sonarOutput');
   const metEl = document.getElementById('sonarMetrics');
@@ -456,6 +483,20 @@ if (d.sonarResult) {
   outEl.textContent = 'No Sonar data';
   metEl.innerHTML = '';
 }
+=======
+    document.getElementById('sonarOutput').textContent = d.sonarResult.summary;
+    const mc = document.getElementById('sonarMetrics');
+    const m2 = d.sonarResult.metrics || {};
+    mc.innerHTML = `
+      <div class="metrics-container">
+        <div class="card"><div class="card-title">🐞 Bugs</div><div class="card-value">${m2.bugs||'—'}</div></div>
+        <div class="card"><div class="card-title">🔒 Vulnerabilities</div><div class="card-value">${m2.vulnerabilities||'—'}</div></div>
+        <div class="card"><div class="card-title">🛠 Code Smells</div><div class="card-value">${m2.code_smells||'—'}</div></div>
+        <div class="card"><div class="card-title">🧪 Coverage</div><div class="card-value">${m2.coverage||'—'}</div></div>
+        <div class="card"><div class="card-title">🔁 Duplication %</div><div class="card-value">${m2.duplicated_lines_density||'—'}</div></div>
+      </div>
+    `;
+>>>>>>> 3fe54b9 (Dashboard updated)
 
     (d.chatHistory || []).forEach(c3 => {
       const time = c3.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -473,7 +514,11 @@ if (d.sonarResult) {
   }
 });
 
+<<<<<<< HEAD
     window.onload=()=>{document.getElementById('scanAll').click();};
+=======
+    window.onload=()=>{setLoading(true);vscode.postMessage({command:'refresh'});document.getElementById('scanAll').click();};
+>>>>>>> 3fe54b9 (Dashboard updated)
   </script>
 </body>
 </html>
