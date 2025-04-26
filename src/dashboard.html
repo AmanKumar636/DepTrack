@@ -26,7 +26,11 @@
     section#cards{flex:1;display:flex;flex-wrap:wrap;gap:var(--gap);padding:var(--gap);overflow:auto;background:var(--bg-dark)}
     .card{background:var(--card-bg);border-radius:var(--radius);box-shadow:0 4px 12px var(--shadow);flex:1 1 calc(33% - var(--gap));min-width:260px;display:flex;flex-direction:column;transition:transform .2s}
     .card:hover{transform:translateY(-6px)}
-    .card header{display:flex;justify-content:space-between;align-items:center;padding:var(--gap);background:var(--bg-darker);color:var(--accent);font-weight:bold;font-size:1.1rem;border-bottom:1px solid rgba(255,255,255,0.1)}
+      .card .content {
+    flex: 1 1 auto;
+    overflow: auto;
+  } 
+	.card header{display:flex;justify-content:space-between;align-items:center;padding:var(--gap);background:var(--bg-darker);color:var(--accent);font-weight:bold;font-size:1.1rem;border-bottom:1px solid rgba(255,255,255,0.1)}
     .card header .actions{display:flex;align-items:center;gap:0.5rem}
     .card-refresh,.card-stop,.card-delete{background:none;border:none;cursor:pointer;font-size:1rem;color:var(--accent)}
     .spinner{display:none;margin-left:.5rem}.spin{display:inline-block;animation:spin 1s linear infinite}@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
@@ -242,7 +246,17 @@
     document.getElementById('csv').addEventListener('click',()=>{csvSpinner.classList.add('spin');vscode.postMessage({command:'exportCSV'});setTimeout(()=>csvSpinner.classList.remove('spin'),2000);});
     document.getElementById('pdf').addEventListener('click',()=>{pdfSpinner.classList.add('spin');vscode.postMessage({command:'exportPDF'});setTimeout(()=>pdfSpinner.classList.remove('spin'),2000);});
     document.getElementById('sendInputEmail').addEventListener('click',()=>{const i=document.getElementById('emailInput');if(i.checkValidity())vscode.postMessage({command:'sendEmail',email:i.value});});
-    document.querySelectorAll('.card-refresh').forEach(btn=>{btn.addEventListener('click',()=>{console.log(`Refreshing ${btn.dataset.view}`);const sp=btn.parentElement.querySelector('.spinner');sp.classList.add('spin');healthMode=false;vscode.postMessage({command:'refresh',view:btn.dataset.view});});});
+    document.querySelectorAll('.card-refresh').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const view = btn.dataset.view;
+    console.log(`Refreshing ${view}`);
+    const sp = btn.parentElement.querySelector('.spinner');
+    sp.classList.add('spin');
+    // send a view-specific command to your extension
+    vscode.postMessage({ command: `refresh${view[0].toUpperCase()}${view.slice(1)}` });
+  });
+});
+
     document.querySelectorAll('.card-stop').forEach(btn=>{btn.addEventListener('click',()=>{const sp=btn.parentElement.querySelector('.spinner');sp.classList.remove('spin');});});
     document.querySelectorAll('.card-delete').forEach(btn=>{btn.addEventListener('click',()=>{document.getElementById('logOutput').textContent='';document.getElementById('logStatus').className='status-dot';});});
     document.getElementById('sendChat').addEventListener('click',()=>{const t=document.getElementById('chatInput').value.trim();if(t){const time=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});appendMessage('user',t,time);document.getElementById('chatInput').value='';vscode.postMessage({command:'chat',text:t});}});
@@ -250,7 +264,139 @@
     document.getElementById('clearChat').addEventListener('click',()=>{document.getElementById('chatContainer').innerHTML='';});
     document.getElementById('scanView').addEventListener('click',()=>{healthMode=false;const view=document.getElementById('viewSelect').value;container.style.flexWrap='nowrap';container.innerHTML='';const getCard=name=>allCards.find(c=>c.dataset.view===name);if(view==='chatbot'){const card=getCard('chatbot');card.style.flex='0 0 100%';container.appendChild(card);}else if(view==='fixes'){const fixes=getCard('fixes');const chat=getCard('chatbot');fixes.style.flex='0 0 50%';chat.style.flex='0 0 50%';container.appendChild(fixes);container.appendChild(chat);}else if(view==='sonar'){const card=getCard('sonar');card.style.flex='0 0 100%';container.appendChild(card);}else{const mainCard=getCard(view);const chatCard=getCard('chatbot');mainCard.style.flex='0 0 70%';chatCard.style.flex='0 0 30%';container.appendChild(mainCard);container.appendChild(chatCard);}});  
     document.getElementById('scanAll').addEventListener('click',()=>{healthMode=false;container.style.flexWrap='wrap';container.innerHTML='';allCards.filter(c=>!['sonar','chatbot','fixes'].includes(c.dataset.view)).forEach(c=>{c.style.flex='1 1 calc(33% - var(--gap))';container.appendChild(c);});const sonarCard=allCards.find(c=>c.dataset.view==='sonar');sonarCard.style.flex='0 0 100%';container.appendChild(sonarCard);['fixes','chatbot'].forEach(view=>{const card=allCards.find(c=>c.dataset.view===view);card.style.flex='0 0 100%';container.appendChild(card);});});  
-    window.addEventListener('message',e=>{const m=e.data;if(m.command==='logUpdate'){const L=m.payload;const dot=document.getElementById('logStatus');const err=L.some(l=>/\bERROR\b/i.test(l));const wrn=!err&&L.some(l=>/\bWARN(?:ING)?\b/i.test(l));dot.className='status-dot';if(err)dot.classList.add('error');else if(wrn)dot.classList.add('warning');document.getElementById('logOutput').textContent=L.join('\n');return;}if(m.command==='updateData'&&!healthMode){setLoading(false);const d=m.payload;const outTb=document.querySelector('#outdatedTable tbody');outTb.innerHTML='';Object.entries(d.outdated||{}).forEach(([pkg,info])=>{const r=outTb.insertRow();r.innerHTML=`<td><span class="status ${info.status}"></span></td><td>${pkg}</td><td>${info.current}</td><td>${info.latest}</td>`;});const vulTb=document.querySelector('#vulnTable tbody');vulnTb.innerHTML='';if(d.vulnError){const r=vulnTb.insertRow();r.innerHTML=`<td colspan="3" style="color:tomato;">${d.vulnError}</td>`;}else{Object.entries(d.vuln||{}).forEach(([pkg,list])=>list.forEach(v=>{const r=vulnTb.insertRow();r.innerHTML=`<td>${pkg}</td><td>${v.severity}</td><td>${v.title}</td>`;}));}const licTb=document.querySelector('#licenseTable tbody');licTb.innerHTML='';(d.licenseIssues||[]).forEach(x=>{const r=licTb.insertRow();r.innerHTML=`<td>${x.pkg}</td><td>${x.licenses.join(', ')}</td>`;});const esTb=document.querySelector('#eslintTable tbody');esTb.innerHTML='';(d.eslintDetails||[]).forEach(e2=>{const r=esTb.insertRow();r.innerHTML=`<td>${e2.file}</td><td>${e2.line}</td><td>${e2.rule}</td><td>${e2.message}</td>`;});const dupTb=document.querySelector('#dupTable tbody');dupTb.innerHTML='';(d.duplicationDetails||[]).forEach(dd=>{const r=dupTb.insertRow();r.innerHTML=`<td>${dd.fileA}</td><td>${dd.lineA}</td><td>${dd.fileB}</td><td>${dd.lineB}</td>`;});const compData=d.complexity||[];const labels=compData.map(c=>c.path.split(/[\\/]/).pop());const cyclo=compData.map(c=>c.aggregate.cyclomatic);const sloc=compData.map(c=>c.aggregate.sloc);const maint=compData.map(c=>c.aggregate.maintainability);const ctx1=document.getElementById('complexityChart').getContext('2d');complexityChart?.destroy();complexityChart=new Chart(ctx1,{type:'bar',data:{labels:labels,datasets:[{label:'Cyclomatic',data:cyclo},{label:'SLOC',data:sloc},{label:'Maintainability',data:maint}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#fff'}}},scales:{x:{beginAtZero:true,ticks:{color:'#fff',stepSize:1},grid:{color:'rgba(255,255,255,0.1)'}},y:{ticks:{color:'#fff',autoSkip:false},grid:{display:false}}}}});const secTb=document.querySelector('#secretTable tbody');secTb.innerHTML='';(d.secrets||[]).forEach(s=>{const r=secTb.insertRow();r.innerHTML=`<td>${s.file}</td><td>${s.line}</td><td>${s.rule}</td><td>${s.match}</td>`;});const dgLabels=Object.keys(d.depGraph||{});const dgShort=dgLabels.map(l=>l.split(/[\\/]/).pop());const dgValues=dgLabels.map(pkg=>parseInt((d.depGraph[pkg].version||'0').split('.')[0],10)||0);const ctx2=document.getElementById('dep-graph').getContext('2d');depChart?.destroy();depChart=new Chart(ctx2,{type:'bar',data:{labels:dgShort,datasets:[{label:'Version (major)',data:dgValues}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#fff'}}},scales:{x:{beginAtZero:true,ticks:{color:'#fff',stepSize:1},grid:{color:'rgba(255,255,255,0.1)'}},y:{ticks:{color:'#fff',autoSkip:false},grid:{display:false}}}}});document.getElementById('sonarOutput').textContent=d.sonarResult.summary;const mc=document.getElementById('sonarMetrics');const m2=d.sonarResult.metrics||{};mc.innerHTML=`<div class="metrics-container"><div class="card"><div class="card-title">🐞 Bugs</div><div class="card-value">${m2.bugs||'—'}</div></div><div class="card"><div class="card-title">🔒 Vulnerabilities</div><div class="card-value">${m2.vulnerabilities||'—'}</div></div><div class="card"><div class="card-title">🛠 Code Smells</div><div class="card-value">${m2.code_smells||'—'}</div></div><div class="card"><div class="card-title">🧪 Coverage</div><div class="card-value">${m2.coverage||'—'}</div></div><div class="card"><div class="card-title">🔁 Duplication %</div><div class="card-value">${m2.duplicated_lines_density||'—'}</div></div></div>`;(d.chatHistory||[]).forEach(c3=>{const time=c3.time||new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});appendMessage(c3.from,c3.text,time);});const fixTb=document.querySelector('#fixTable tbody');fixTb.innerHTML='';(d.suggestedFixes||[]).forEach(f=>{const r=fixTb.insertRow();r.innerHTML=`<td>${f.pkg}</td><td>${f.fix}</td>`;});}});
+ window.addEventListener('message', e => {
+  const m = e.data;
+  if (m.command === 'logUpdate') {
+    const L = m.payload;
+    const dot = document.getElementById('logStatus');
+    const err = L.some(l => /\bERROR\b/i.test(l));
+    const wrn = !err && L.some(l => /\bWARN(?:ING)?\b/i.test(l));
+    dot.className = 'status-dot';
+    if (err) dot.classList.add('error');
+    else if (wrn) dot.classList.add('warning');
+    document.getElementById('logOutput').textContent = L.join('\n');
+    return;
+  }
+  if (m.command === 'updateData' && !healthMode) {
+    setLoading(false);
+    const d = m.payload;
+
+    const outTb = document.querySelector('#outdatedTable tbody');
+    outTb.innerHTML = '';
+    Object.entries(d.outdated || {}).forEach(([pkg, info]) => {
+      const r = outTb.insertRow();
+      r.innerHTML = `<td><span class="status ${info.status}"></span></td><td>${pkg}</td><td>${info.current}</td><td>${info.latest}</td>`;
+    });
+
+    const vulTb = document.querySelector('#vulnTable tbody');
+    vulTb.innerHTML = '';
+    if (d.vulnError) {
+      const r = vulTb.insertRow();
+      r.innerHTML = `<td colspan="3" style="color:tomato;">${d.vulnError}</td>`;
+    } else {
+      Object.entries(d.vuln || {}).forEach(([pkg, list]) => list.forEach(v => {
+        const r = vulTb.insertRow();
+        r.innerHTML = `<td>${pkg}</td><td>${v.severity}</td><td>${v.title}</td>`;
+      }));
+    }
+
+    const licTb = document.querySelector('#licenseTable tbody');
+    licTb.innerHTML = '';
+    (d.licenseIssues || []).forEach(x => {
+      const r = licTb.insertRow();
+      r.innerHTML = `<td>${x.pkg}</td><td>${x.licenses.join(', ')}</td>`;
+    });
+
+    const esTb = document.querySelector('#eslintTable tbody');
+    esTb.innerHTML = '';
+    (d.eslintDetails || []).forEach(e2 => {
+      const r = esTb.insertRow();
+      r.innerHTML = `<td>${e2.file}</td><td>${e2.line}</td><td>${e2.rule}</td><td>${e2.message}</td>`;
+    });
+
+    const dupTb = document.querySelector('#dupTable tbody');
+    dupTb.innerHTML = '';
+    (d.duplicationDetails || []).forEach(dd => {
+      const r = dupTb.insertRow();
+      r.innerHTML = `<td>${dd.fileA}</td><td>${dd.lineA}</td><td>${dd.fileB}</td><td>${dd.lineB}</td>`;
+    });
+
+    const compData = d.complexity || [];
+    const labels = compData.map(c => c.path.split(/[\\/]/).pop());
+    const cyclo = compData.map(c => c.aggregate.cyclomatic);
+    const sloc = compData.map(c => c.aggregate.sloc);
+    const maint = compData.map(c => c.aggregate.maintainability);
+    const ctx1 = document.getElementById('complexityChart').getContext('2d');
+    complexityChart?.destroy();
+    complexityChart = new Chart(ctx1, {
+      type: 'bar',
+      data: { labels, datasets: [{ label: 'Cyclomatic', data: cyclo }, { label: 'SLOC', data: sloc }, { label: 'Maintainability', data: maint }] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#fff' } } },
+        scales: {
+          x: { beginAtZero: true, ticks: { color: '#fff', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.1)' } },
+          y: { ticks: { color: '#fff', autoSkip: false }, grid: { display: false } }
+        }
+      }
+    });
+
+    const secTb = document.querySelector('#secretTable tbody');
+    secTb.innerHTML = '';
+    (d.secrets || []).forEach(s => {
+      const r = secTb.insertRow();
+      r.innerHTML = `<td>${s.file}</td><td>${s.line}</td><td>${s.rule}</td><td>${s.match}</td>`;
+    });
+
+    const dgLabels = Object.keys(d.depGraph || {});
+    const dgShort = dgLabels.map(l => l.split(/[\\/]/).pop());
+    const dgValues = dgLabels.map(pkg => parseInt((d.depGraph[pkg].version || '0').split('.')[0], 10) || 0);
+    const ctx2 = document.getElementById('dep-graph').getContext('2d');
+    depChart?.destroy();
+    depChart = new Chart(ctx2, {
+      type: 'bar',
+      data: { labels: dgShort, datasets: [{ label: 'Version (major)', data: dgValues }] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#fff' } } },
+        scales: {
+          x: { beginAtZero: true, ticks: { color: '#fff', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.1)' } },
+          y: { ticks: { color: '#fff', autoSkip: false }, grid: { display: false } }
+        }
+      }
+    });
+
+    document.getElementById('sonarOutput').textContent = d.sonarResult.summary;
+    const mc = document.getElementById('sonarMetrics');
+    const m2 = d.sonarResult.metrics || {};
+    mc.innerHTML = `
+      <div class="metrics-container">
+        <div class="card"><div class="card-title">🐞 Bugs</div><div class="card-value">${m2.bugs||'—'}</div></div>
+        <div class="card"><div class="card-title">🔒 Vulnerabilities</div><div class="card-value">${m2.vulnerabilities||'—'}</div></div>
+        <div class="card"><div class="card-title">🛠 Code Smells</div><div class="card-value">${m2.code_smells||'—'}</div></div>
+        <div class="card"><div class="card-title">🧪 Coverage</div><div class="card-value">${m2.coverage||'—'}</div></div>
+        <div class="card"><div class="card-title">🔁 Duplication %</div><div class="card-value">${m2.duplicated_lines_density||'—'}</div></div>
+      </div>
+    `;
+
+    (d.chatHistory || []).forEach(c3 => {
+      const time = c3.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      appendMessage(c3.from, c3.text, time);
+    });
+
+    const fixTb = document.querySelector('#fixTable tbody');
+    fixTb.innerHTML = '';
+    (d.suggestedFixes || []).forEach(f => {
+      const r = fixTb.insertRow();
+      r.innerHTML = `<td>${f.pkg}</td><td>${f.fix}</td>`;
+    });
+
+    document.querySelectorAll('.card .spinner.spin').forEach(sp => sp.classList.remove('spin'));
+  }
+});
+
     window.onload=()=>{setLoading(true);vscode.postMessage({command:'refresh'});document.getElementById('scanAll').click();};
   </script>
 </body>
