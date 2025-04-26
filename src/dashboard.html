@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
-  <title>DepTrack Dashboard</title>
+  <title>Welcome</title>
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' vscode-resource: data: https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data:;">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <style>
@@ -13,7 +13,8 @@
     aside#aside h2{font-size:1.75rem;text-align:center;color:var(--accent)}
     .email-row{display:flex;gap:0.5rem}
     .email-row input{flex:1;padding:0.5rem;border-radius:var(--radius);border:none;background:var(--card-bg);color:var(--text-light)}
-    .email-row button{padding:0.5rem 1rem;border:none;border-radius:var(--radius);background:var(--accent);color:#fff;cursor:pointer}
+    .email-row button{padding:0.5rem 1rem;border:none;border-radius:var(--radius);background:var(--accent);color:#fff;cursor:pointer;transition:background .3s,transform .2s;box-shadow:0 4px 8px rgba(0,0,0,0.3)}
+    .email-row button:hover{background:rgba(58,115,183,1);transform:translateY(-2px)}
     aside#aside button{display:flex;align-items:center;gap:0.5rem;padding:0.75rem;border:none;background:none;color:var(--text-light);border-radius:var(--radius);cursor:pointer;transition:background .2s}
     aside#aside button:hover,aside#aside button.active{background:rgba(74,144,226,0.2)}
     main#main{flex:1;display:flex;flex-direction:column}
@@ -21,12 +22,14 @@
     #controls{display:flex;gap:0.5rem;padding:var(--gap);background:var(--bg-darker)}
     #viewSelect,#scanView,#scanAll{padding:0.5rem;border-radius:var(--radius);border:none;background:var(--card-bg);color:var(--text-light);cursor:pointer}
     #viewSelect:hover,#scanView:hover,#scanAll:hover{background:rgba(255,255,255,0.1)}
+    #viewSelect option{background:var(--card-bg);color:var(--text-light)}
     section#cards{flex:1;display:flex;flex-wrap:wrap;gap:var(--gap);padding:var(--gap);overflow:auto;background:var(--bg-dark)}
     .card{background:var(--card-bg);border-radius:var(--radius);box-shadow:0 4px 12px var(--shadow);flex:1 1 calc(33% - var(--gap));min-width:260px;display:flex;flex-direction:column;transition:transform .2s}
     .card:hover{transform:translateY(-6px)}
     .card header{display:flex;justify-content:space-between;align-items:center;padding:var(--gap);background:var(--bg-darker);color:var(--accent);font-weight:bold;font-size:1.1rem;border-bottom:1px solid rgba(255,255,255,0.1)}
-    .card-refresh{background:none;border:none;cursor:pointer;font-size:1rem;color:var(--accent)}
-    .card .content{padding:var(--gap);overflow:auto;color:var(--text-light);font-size:.9rem}
+    .card header .actions{display:flex;align-items:center;gap:0.5rem}
+    .card-refresh,.card-stop,.card-delete{background:none;border:none;cursor:pointer;font-size:1rem;color:var(--accent)}
+    .spinner{display:none;margin-left:.5rem}.spin{display:inline-block;animation:spin 1s linear infinite}@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
     .card[data-view="sonar"]{flex:1 1 100%;min-width:auto}
     .card[data-view="fixes"],.card[data-view="chatbot"]{flex:0 0 100%;min-width:auto}
     table{width:100%;border-collapse:collapse}
@@ -36,13 +39,24 @@
     footer#footer{padding:var(--gap);text-align:center;background:var(--bg-darker);color:var(--text-muted);font-size:.85rem;box-shadow:0 -2px 4px var(--shadow)}
     .status{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
     .status.good{background:var(--accent)}.status.warning{background:gold}.status.critical{background:#e74c3c}
-    .spinner{display:none;margin-left:.5rem}.spinner.spin{display:inline-block;animation:spin 1s linear infinite}@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
     .status-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-left:8px;vertical-align:middle;background:#2ecc71}
     .status-dot.warning{background:gold}.status-dot.error{background:#e74c3c}
     .metrics-container{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:var(--gap);margin-top:var(--gap)}
     .metrics-container .card{background:var(--panel-bg);padding:var(--gap);text-align:center;border-radius:var(--radius)}
     .metrics-container .card-title{font-size:1rem;margin-bottom:0.5rem}
     .metrics-container .card-value{font-size:1.25rem;font-weight:bold}
+    .card[data-view="chatbot"] .content{display:flex;flex-direction:column;height:100%}
+    #chatContainer{flex:1;overflow-y:auto;padding-bottom:var(--gap);display:flex;flex-direction:column;gap:0.25rem}
+    .chat-input-row{display:flex;gap:0.5rem;margin-top:0.5rem}
+    .chat-input-row input{flex:1;border:none;border-radius:var(--radius);padding:0.5rem;background:var(--card-bg);color:var(--text-light)}
+    #clearChat{background:var(--card-bg);color:var(--accent);border:none;padding:0.5rem;border-radius:var(--radius);cursor:pointer;transition:background .2s}
+    #clearChat:hover{background:rgba(74,144,226,0.2)}
+    #sendChat{background:var(--accent);color:#fff;border:none;padding:0.5rem 1rem;border-radius:var(--radius);cursor:pointer;transition:background .3s}
+    #sendChat:hover{background:rgba(58,115,183,1)}
+    .message{max-width:70%;padding:0.5rem 1rem;border-radius:12px;display:flex;flex-direction:column;gap:0.25rem;word-wrap:break-word}
+    .message.user{align-self:flex-end;background:var(--accent);color:#fff}
+    .message.bot{align-self:flex-start;background:var(--panel-bg);color:var(--text-light)}
+    .timestamp{font-size:.75rem;color:var(--text-muted);opacity:0.8}
   </style>
 </head>
 <body>
@@ -52,14 +66,13 @@
       <input id="emailInput" type="email" placeholder="you@example.com"/>
       <button id="sendInputEmail">Send</button>
     </div>
-    <button id="refresh" class="active">🔄 Refresh <span id="spinner" class="spinner">⏳</span></button>
-    <button id="health">🩺 Health Check</button>
-    <button id="email">✉️ Email Alert <span id="emailSpinner" class="spinner">⏳</span></button>
-    <button id="csv">📑 Export CSV <span id="csvSpinner" class="spinner">⏳</span></button>
-    <button id="pdf">📄 Export PDF <span id="pdfSpinner" class="spinner">⏳</span></button>
+    <button id="refresh" class="active">🔄 Refresh<span id="spinner" class="spinner">⏳</span></button>
+    <button id="email">📨 Email Alert<span id="emailSpinner" class="spinner">⏳</span></button>
+    <button id="csv">📊 Export CSV<span id="csvSpinner" class="spinner">⏳</span></button>
+    <button id="pdf">📕 Export PDF<span id="pdfSpinner" class="spinner">⏳</span></button>
   </aside>
   <main id="main">
-    <header id="header">DepTrack Dashboard</header>
+    <header id="header">Welcome</header>
     <div id="controls">
       <select id="viewSelect">
         <option value="outdated">Outdated</option>
@@ -78,271 +91,167 @@
       <button id="scanAll">Show All</button>
     </div>
     <section id="cards">
-      <div class="card" data-view="log"><header>Process Log <button class="card-refresh" data-view="log">🔄</button><span id="logStatus" class="status-dot"></span></header><div class="content"><pre id="logOutput"></pre></div></div>
-      <div class="card" data-view="outdated"><header>Outdated Packages <button class="card-refresh" data-view="outdated">🔄</button></header><div class="content"><table id="outdatedTable"><thead><tr><th></th><th>Pkg</th><th>Curr</th><th>Latest</th></tr></thead><tbody></tbody></table></div></div>
-      <div class="card" data-view="vuln"><header>Vulnerabilities <button class="card-refresh" data-view="vuln">🔄</button></header><div class="content"><table id="vulnTable"><thead><tr><th>Pkg</th><th>Severity</th><th>Title</th></tr></thead><tbody></tbody></table></div></div>
-      <div class="card" data-view="license"><header>Forbidden Licenses <button class="card-refresh" data-view="license">🔄</button></header><div class="content"><table id="licenseTable"><thead><tr><th>Pkg</th><th>License</th></tr></thead><tbody></tbody></table></div></div>
-      <div class="card" data-view="eslint"><header>ESLint Issues <button class="card-refresh" data-view="eslint">🔄</button></header><div class="content"><table id="eslintTable"><thead><tr><th>File</th><th>Line</th><th>Rule</th><th>Msg</th></tr></thead><tbody></tbody></table></div></div>
-      <div class="card" data-view="duplication"><header>Duplication <button class="card-refresh" data-view="duplication">🔄</button></header><div class="content"><table id="dupTable"><thead><tr><th>A</th><th>La</th><th>B</th><th>Lb</th></tr></thead><tbody></tbody></table></div></div>
-      <div class="card" data-view="complexity"><header>Complexity <button class="card-refresh" data-view="complexity">🔄</button></header><div class="content"><canvas id="complexityChart" style="height:250px"></canvas></div></div>
-      <div class="card" data-view="secret"><header>Secrets <button class="card-refresh" data-view="secret">🔄</button></header><div class="content"><table id="secretTable"><thead><tr><th>File</th><th>Line</th><th>Rule</th><th>Match</th></tr></thead><tbody></tbody></table></div></div>
-      <div class="card" data-view="depgraph"><header>Dependency Graph <button class="card-refresh" data-view="depgraph">🔄</button></header><div class="content"><canvas id="dep-graph" style="height:300px"></canvas></div></div>
-      <div class="card" data-view="fixes"><header>Suggested Fixes <button class="card-refresh" data-view="fixes">🔄</button></header><div class="content"><table id="fixTable"><thead><tr><th>Package</th><th>Fix</th></tr></thead><tbody></tbody></table></div></div>
-      <div class="card" data-view="sonar"><header>Sonar Report <button class="card-refresh" data-view="sonar">🔄</button></header><div class="content"><pre id="sonarOutput"></pre><div id="sonarMetrics" class="metrics-container"></div></div></div>
-      <div class="card" data-view="chatbot"><header>Chatbot</header><div class="content"><div id="chatContainer"></div><div style="display:flex;gap:.5rem;margin-top:.5rem"><input id="chatInput" type="text" placeholder="Message…" style="flex:1;border:none;border-radius:12px;padding:.5rem"/><button id="sendChat" style="padding:.5rem 1rem;border:none;border-radius:12px;background:var(--accent);color:#fff;cursor:pointer">Send</button></div></div></div>
+      <div class="card" data-view="log">
+        <header>
+          Process Log
+          <div class="actions">
+            <button class="card-delete" data-view="log">🗑️</button>
+          </div>
+          <span id="logStatus" class="status-dot"></span>
+        </header>
+        <div class="content"><pre id="logOutput"></pre></div>
+      </div>
+      <div class="card" data-view="outdated">
+        <header>
+          Outdated Packages
+          <div class="actions">
+            <button class="card-refresh" data-view="outdated">🔄</button>
+            <button class="card-stop" data-view="outdated">⏹️</button>
+            <span class="spinner">⏳</span>
+          </div>
+        </header>
+        <div class="content"><table id="outdatedTable"><thead><tr><th></th><th>Pkg</th><th>Curr</th><th>Latest</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card" data-view="vuln">
+        <header>
+          Vulnerabilities
+          <div class="actions">
+            <button class="card-refresh" data-view="vuln">🔄</button>
+            <button class="card-stop" data-view="vuln">⏹️</button>
+            <span class="spinner">⏳</span>
+          </div>
+        </header>
+        <div class="content"><table id="vulnTable"><thead><tr><th>Pkg</th><th>Severity</th><th>Title</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card" data-view="license">
+        <header>
+          Forbidden Licenses
+          <div class="actions">
+            <button class="card-refresh" data-view="license">🔄</button>
+            <button class="card-stop" data-view="license">⏹️</button>
+            <span class="spinner">⏳</span>
+          </div>
+        </header>
+        <div class="content"><table id="licenseTable"><thead><tr><th>Pkg</th><th>License</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card" data-view="eslint">
+        <header>
+          ESLint Issues
+          <div class="actions">
+            <button class="card-refresh" data-view="eslint">🔄</button>
+            <button class="card-stop" data-view="eslint">⏹️</button>
+            <span class="spinner">⏳</span>
+          </div>
+        </header>
+        <div class="content"><table id="eslintTable"><thead><tr><th>File</th><th>Line</th><th>Rule</th><th>Msg</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card" data-view="duplication">
+        <header>
+          Duplication
+          <div class="actions">
+            <button class="card-refresh" data-view="duplication">🔄</button>
+            <button class="card-stop" data-view="duplication">⏹️</button>
+            <span class="spinner">⏳</span>
+          </div>
+        </header>
+        <div class="content"><table id="dupTable"><thead><tr><th>A</th><th>La</th><th>B</th><th>Lb</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card" data-view="complexity">
+        <header>
+          Complexity
+          <div class="actions">
+            <button class="card-refresh" data-view="complexity">🔄</button>
+            <button class="card-stop" data-view="complexity">⏹️</button>
+            <span class="spinner">⏳</span>
+          </div>
+        </header>
+        <div class="content"><canvas id="complexityChart" style="height:250px"></canvas></div>
+      </div>
+      <div class="card" data-view="secret">
+        <header>
+          Secrets
+          <div class="actions">
+            <button class="card-refresh" data-view="secret">🔄</button>
+            <button class="card-stop" data-view="secret">⏹️</button>
+            <span class="spinner">⏳</span>
+          </div>
+        </header>
+        <div class="content"><table id="secretTable"><thead><tr><th>File</th><th>Line</th><th>Rule</th><th>Match</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card" data-view="depgraph">
+        <header>
+          Dependency Graph
+          <div class="actions">
+            <button class="card-refresh" data-view="depgraph">🔄</button>
+            <button class="card-stop" data-view="depgraph">⏹️</button>
+            <span class="spinner">⏳</span>
+          </div>
+        </header>
+        <div class="content"><canvas id="dep-graph" style="height:300px"></canvas></div>
+      </div>
+      <div class="card" data-view="fixes">
+        <header>
+          Suggested Fixes
+          <div class="actions">
+            <button class="card-refresh" data-view="fixes">🔄</button>
+            <button class="card-stop" data-view="fixes">⏹️</button>
+            <span class="spinner">⏳</span>
+          </div>
+        </header>
+        <div class="content"><table id="fixTable"><thead><tr><th>Package</th><th>Fix</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card" data-view="sonar">
+        <header>
+          Sonar Report
+          <div class="actions">
+            <button class="card-refresh" data-view="sonar">🔄</button>
+            <button class="card-stop" data-view="sonar">⏹️</button>
+            <span class="spinner">⏳</span>
+          </div>
+        </header>
+        <div class="content"><pre id="sonarOutput"></pre><div id="sonarMetrics" class="metrics-container"></div></div>
+      </div>
+      <div class="card" data-view="chatbot">
+        <header>Chatbot</header>
+        <div class="content">
+          <div id="chatContainer"></div>
+          <div class="chat-input-row">
+            <input id="chatInput" type="text" placeholder="Message…" />
+            <button id="clearChat">🗑️</button>
+            <button id="sendChat">Send</button>
+          </div>
+        </div>
+      </div>
     </section>
-    <footer id="footer">© DepTrack</footer>
+    <footer id="footer">© Aman Kumar 2025</footer>
   </main>
   <script>
-    const vscode = acquireVsCodeApi();
-    let complexityChart, depChart, healthMode = false;
-    const container = document.getElementById('cards');
-    const allCards = Array.from(container.children);
-    const spinner = document.getElementById('spinner');
-    const emailSpinner = document.getElementById('emailSpinner');
-    const csvSpinner = document.getElementById('csvSpinner');
-    const pdfSpinner = document.getElementById('pdfSpinner');
-    function setLoading(load) {
-      document.getElementById('refresh').classList.toggle('active', !load);
-      spinner.classList.toggle('spin', load);
-    }
-    document.getElementById('refresh').addEventListener('click', () => {
-      healthMode = false;
-      setLoading(true);
-      vscode.postMessage({ command: 'refresh' });
-    });
-    document.getElementById('health').addEventListener('click', () => {
-      healthMode = true;
-      container.style.flexWrap = 'nowrap';
-      container.innerHTML = '';
-      const log = allCards.find(c => c.dataset.view === 'log');
-      const ch = allCards.find(c => c.dataset.view === 'chatbot');
-      log.style.flex = '0 0 70%';
-      ch.style.flex = '0 0 30%';
-      container.appendChild(log);
-      container.appendChild(ch);
-    });
-    document.getElementById('email').addEventListener('click', () => {
-      emailSpinner.classList.add('spin');
-      vscode.postMessage({ command: 'sendEmail' });
-      setTimeout(() => emailSpinner.classList.remove('spin'), 2000);
-    });
-    document.getElementById('csv').addEventListener('click', () => {
-      csvSpinner.classList.add('spin');
-      vscode.postMessage({ command: 'exportCSV' });
-      setTimeout(() => csvSpinner.classList.remove('spin'), 2000);
-    });
-    document.getElementById('pdf').addEventListener('click', () => {
-      pdfSpinner.classList.add('spin');
-      vscode.postMessage({ command: 'exportPDF' });
-      setTimeout(() => pdfSpinner.classList.remove('spin'), 2000);
-    });
-    document.getElementById('sendInputEmail').addEventListener('click', () => {
-      const i = document.getElementById('emailInput');
-      if (i.checkValidity()) vscode.postMessage({ command: 'sendEmail', email: i.value });
-    });
-    document.getElementById('sendChat').addEventListener('click', () => {
-      const t = document.getElementById('chatInput').value.trim();
-      if (t) {
-        vscode.postMessage({ command: 'chat', text: t });
-        document.getElementById('chatInput').value = '';
-      }
-    });
-    document.getElementById('scanView').addEventListener('click', () => {
-      healthMode = false;
-      const view = document.getElementById('viewSelect').value;
-      container.style.flexWrap = 'nowrap';
-      container.innerHTML = '';
-      const getCard = name => allCards.find(c => c.dataset.view === name);
-      if (view === 'chatbot') {
-        const card = getCard('chatbot');
-        card.style.flex = '0 0 100%';
-        container.appendChild(card);
-      } else if (view === 'fixes') {
-        const fixes = getCard('fixes');
-        const chat = getCard('chatbot');
-        fixes.style.flex = '0 0 50%';
-        chat.style.flex = '0 0 50%';
-        container.appendChild(fixes);
-        container.appendChild(chat);
-      } else if (view === 'sonar') {
-        const card = getCard('sonar');
-        card.style.flex = '0 0 100%';
-        container.appendChild(card);
-      } else {
-        const mainCard = getCard(view);
-        const chatCard = getCard('chatbot');
-        mainCard.style.flex = '0 0 70%';
-        chatCard.style.flex = '0 0 30%';
-        container.appendChild(mainCard);
-        container.appendChild(chatCard);
-      }
-    });
-    document.getElementById('scanAll').addEventListener('click', () => {
-      healthMode = false;
-      container.style.flexWrap = 'wrap';
-      container.innerHTML = '';
-      allCards.filter(c => !['sonar','chatbot','fixes'].includes(c.dataset.view)).forEach(c => {
-        c.style.flex = '1 1 calc(33% - var(--gap))';
-        container.appendChild(c);
-      });
-      const sonarCard = allCards.find(c => c.dataset.view === 'sonar');
-      sonarCard.style.flex = '0 0 100%';
-      container.appendChild(sonarCard);
-      ['fixes','chatbot'].forEach(view => {
-        const card = allCards.find(c => c.dataset.view === view);
-        card.style.flex = '0 0 100%';
-        container.appendChild(card);
-      });
-    });
-    document.querySelectorAll('.card-refresh').forEach(btn => {
-      btn.addEventListener('click', () => {
-        healthMode = false;
-        document.getElementById('viewSelect').value = btn.dataset.view;
-        document.getElementById('scanView').click();
-        setLoading(true);
-        vscode.postMessage({ command: 'refresh' });
-      });
-    });
-    window.addEventListener('message', e => {
-      const m = e.data;
-      if (m.command === 'logUpdate') {
-        const L = m.payload;
-        const err = L.some(l => /\bERROR\b/i.test(l));
-        const wrn = !err && L.some(l => /\bWARN(?:ING)?\b/i.test(l));
-        const dot = document.getElementById('logStatus');
-        dot.className = 'status-dot';
-        if (err) dot.classList.add('error');
-        else if (wrn) dot.classList.add('warning');
-        document.getElementById('logOutput').textContent = L.join('\n');
-        return;
-      }
-      if (m.command === 'updateData' && !healthMode) {
-        setLoading(false);
-        const d = m.payload;
-        const outTb = document.querySelector('#outdatedTable tbody');
-        outTb.innerHTML = '';
-        Object.entries(d.outdated || {}).forEach(([pkg, info]) => {
-          const r = outTb.insertRow();
-          r.innerHTML = `<td><span class="status ${info.status}"></span></td><td>${pkg}</td><td>${info.current}</td><td>${info.latest}</td>`;
-        });
-        const vulTb = document.querySelector('#vulnTable tbody');
-        vulTb.innerHTML = '';
-        if (d.vulnError) {
-          const r = vulTb.insertRow();
-          r.innerHTML = `<td colspan="3" style="color:tomato;">${d.vulnError}</td>`;
-        } else {
-          Object.entries(d.vuln || {}).forEach(([pkg, list]) => list.forEach(v => {
-            const r = vulTb.insertRow();
-            r.innerHTML = `<td>${pkg}</td><td>${v.severity}</td><td>${v.title}</td>`;
-          }));
-        }
-        const licTb = document.querySelector('#licenseTable tbody');
-        licTb.innerHTML = '';
-        (d.licenseIssues || []).forEach(x => {
-          const r = licTb.insertRow();
-          r.innerHTML = `<td>${x.pkg}</td><td>${x.licenses.join(', ')}</td>`;
-        });
-        const esTb = document.querySelector('#eslintTable tbody');
-        esTb.innerHTML = '';
-        (d.eslintDetails || []).forEach(e2 => {
-          const r = esTb.insertRow();
-          r.innerHTML = `<td>${e2.file}</td><td>${e2.line}</td><td>${e2.rule}</td><td>${e2.message}</td>`;
-        });
-        const dupTb = document.querySelector('#dupTable tbody');
-        dupTb.innerHTML = '';
-        (d.duplicationDetails || []).forEach(dd => {
-          const r = dupTb.insertRow();
-          r.innerHTML = `<td>${dd.fileA}</td><td>${dd.lineA}</td><td>${dd.fileB}</td><td>${dd.lineB}</td>`;
-        });
-        const compData = d.complexity || [];
-        const labels = compData.map(c => c.path.split(/[\\/]/).pop());
-        const cyclo = compData.map(c => c.aggregate.cyclomatic);
-        const sloc = compData.map(c => c.aggregate.sloc);
-        const maint = compData.map(c => c.aggregate.maintainability);
-        const ctx1 = document.getElementById('complexityChart').getContext('2d');
-        complexityChart?.destroy();
-        complexityChart = new Chart(ctx1, {
-          type: 'bar',
-          data: {
-            labels: labels,
-            datasets: [
-              { label: 'Cyclomatic', data: cyclo },
-              { label: 'SLOC', data: sloc },
-              { label: 'Maintainability', data: maint }
-            ]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { labels: { color: '#fff' } } },
-            scales: {
-              x: { beginAtZero: true, ticks: { color: '#fff', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.1)' } },
-              y: { ticks: { color: '#fff', autoSkip: false }, grid: { display: false } }
-            }
-          }
-        });
-        const secTb = document.querySelector('#secretTable tbody');
-        secTb.innerHTML = '';
-        (d.secrets || []).forEach(s => {
-          const r = secTb.insertRow();
-          r.innerHTML = `<td>${s.file}</td><td>${s.line}</td><td>${s.rule}</td><td>${s.match}</td>`;
-        });
-        const dgLabels = Object.keys(d.depGraph || {});
-        const dgShort = dgLabels.map(l => l.split(/[\\/]/).pop());
-        const dgValues = dgLabels.map(pkg => {
-          const v = d.depGraph[pkg].version || '0.0.0';
-          return parseInt(v.split('.')[0], 10) || 0;
-        });
-        const ctx2 = document.getElementById('dep-graph').getContext('2d');
-        depChart?.destroy();
-        depChart = new Chart(ctx2, {
-          type: 'bar',
-          data: {
-            labels: dgShort,
-            datasets: [{ label: 'Version (major)', data: dgValues }]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { labels: { color: '#fff' } } },
-            scales: {
-              x: { beginAtZero: true, ticks: { color: '#fff', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.1)' } },
-              y: { ticks: { color: '#fff', autoSkip: false }, grid: { display: false } }
-            }
-          }
-        });
-        document.getElementById('sonarOutput').textContent = d.sonarResult.summary;
-        const mc = document.getElementById('sonarMetrics');
-        const m2 = d.sonarResult.metrics || {};
-        mc.innerHTML = `
-          <div class="metrics-container">
-            <div class="card"><div class="card-title">🐞 Bugs</div><div class="card-value">${m2.bugs||'—'}</div></div>
-            <div class="card"><div class="card-title">🔒 Vulnerabilities</div><div class="card-value">${m2.vulnerabilities||'—'}</div></div>
-            <div class="card"><div class="card-title">🛠 Code Smells</div><div class="card-value">${m2.code_smells||'—'}</div></div>
-            <div class="card"><div class="card-title">🧪 Coverage</div><div class="card-value">${m2.coverage||'—'}</div></div>
-            <div class="card"><div class="card-title">🔁 Duplication %</div><div class="card-value">${m2.duplicated_lines_density||'—'}</div></div>
-          </div>`;
-        const chatCtr = document.getElementById('chatContainer');
-        chatCtr.innerHTML = '';
-        (d.chatHistory || []).forEach(c3 => {
-          const div = document.createElement('div');
-          div.textContent = `${c3.from}: ${c3.text}`;
-          chatCtr.appendChild(div);
-        });
-        const fixTb = document.querySelector('#fixTable tbody');
-        fixTb.innerHTML = '';
-        (d.suggestedFixes || []).forEach(f => {
-          const r = fixTb.insertRow();
-          r.innerHTML = `<td>${f.pkg}</td><td>${f.fix}</td>`;
-        });
-      }
-    });
-    window.onload = () => {
-      setLoading(true);
-      vscode.postMessage({ command: 'refresh' });
-      document.getElementById('scanAll').click();
-    };
+    (function(){const oldLog=console.log;console.log=function(...args){oldLog.apply(console,args);const msg=args.map(a=>typeof a==='object'?JSON.stringify(a):a).join(' ');const out=document.getElementById('logOutput');if(out){out.textContent+=msg+'\n';out.scrollTop=out.scrollHeight;}}})();
+    const vscode=acquireVsCodeApi();
+    let complexityChart,depChart,healthMode=false;
+    const container=document.getElementById('cards');
+    const allCards=Array.from(container.children);
+    const spinnerGlobal=document.getElementById('spinner');
+    const emailSpinner=document.getElementById('emailSpinner');
+    const csvSpinner=document.getElementById('csvSpinner');
+    const pdfSpinner=document.getElementById('pdfSpinner');
+    function setLoading(load){document.getElementById('refresh').classList.toggle('active',!load);spinnerGlobal.classList.toggle('spin',load);}
+    function appendMessage(from,text,time){const chatCtr=document.getElementById('chatContainer');const div=document.createElement('div');div.className='message '+(from==='user'?'user':'bot');const content=document.createElement('div');content.textContent=text;const timestamp=document.createElement('div');timestamp.className='timestamp';timestamp.textContent=time;div.appendChild(content);div.appendChild(timestamp);chatCtr.appendChild(div);chatCtr.scrollTop=chatCtr.scrollHeight;}
+    document.getElementById('refresh').addEventListener('click',()=>{console.log('Refreshing all');healthMode=false;setLoading(true);vscode.postMessage({command:'refresh'});});
+    document.getElementById('email').addEventListener('click',()=>{emailSpinner.classList.add('spin');vscode.postMessage({command:'sendEmail'});setTimeout(()=>emailSpinner.classList.remove('spin'),2000);});
+    document.getElementById('csv').addEventListener('click',()=>{csvSpinner.classList.add('spin');vscode.postMessage({command:'exportCSV'});setTimeout(()=>csvSpinner.classList.remove('spin'),2000);});
+    document.getElementById('pdf').addEventListener('click',()=>{pdfSpinner.classList.add('spin');vscode.postMessage({command:'exportPDF'});setTimeout(()=>pdfSpinner.classList.remove('spin'),2000);});
+    document.getElementById('sendInputEmail').addEventListener('click',()=>{const i=document.getElementById('emailInput');if(i.checkValidity())vscode.postMessage({command:'sendEmail',email:i.value});});
+    document.querySelectorAll('.card-refresh').forEach(btn=>{btn.addEventListener('click',()=>{console.log(`Refreshing ${btn.dataset.view}`);const sp=btn.parentElement.querySelector('.spinner');sp.classList.add('spin');healthMode=false;vscode.postMessage({command:'refresh',view:btn.dataset.view});});});
+    document.querySelectorAll('.card-stop').forEach(btn=>{btn.addEventListener('click',()=>{const sp=btn.parentElement.querySelector('.spinner');sp.classList.remove('spin');});});
+    document.querySelectorAll('.card-delete').forEach(btn=>{btn.addEventListener('click',()=>{document.getElementById('logOutput').textContent='';document.getElementById('logStatus').className='status-dot';});});
+    document.getElementById('sendChat').addEventListener('click',()=>{const t=document.getElementById('chatInput').value.trim();if(t){const time=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});appendMessage('user',t,time);document.getElementById('chatInput').value='';vscode.postMessage({command:'chat',text:t});}});
+    document.getElementById('chatInput').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('sendChat').click();});
+    document.getElementById('clearChat').addEventListener('click',()=>{document.getElementById('chatContainer').innerHTML='';});
+    document.getElementById('scanView').addEventListener('click',()=>{healthMode=false;const view=document.getElementById('viewSelect').value;container.style.flexWrap='nowrap';container.innerHTML='';const getCard=name=>allCards.find(c=>c.dataset.view===name);if(view==='chatbot'){const card=getCard('chatbot');card.style.flex='0 0 100%';container.appendChild(card);}else if(view==='fixes'){const fixes=getCard('fixes');const chat=getCard('chatbot');fixes.style.flex='0 0 50%';chat.style.flex='0 0 50%';container.appendChild(fixes);container.appendChild(chat);}else if(view==='sonar'){const card=getCard('sonar');card.style.flex='0 0 100%';container.appendChild(card);}else{const mainCard=getCard(view);const chatCard=getCard('chatbot');mainCard.style.flex='0 0 70%';chatCard.style.flex='0 0 30%';container.appendChild(mainCard);container.appendChild(chatCard);}});  
+    document.getElementById('scanAll').addEventListener('click',()=>{healthMode=false;container.style.flexWrap='wrap';container.innerHTML='';allCards.filter(c=>!['sonar','chatbot','fixes'].includes(c.dataset.view)).forEach(c=>{c.style.flex='1 1 calc(33% - var(--gap))';container.appendChild(c);});const sonarCard=allCards.find(c=>c.dataset.view==='sonar');sonarCard.style.flex='0 0 100%';container.appendChild(sonarCard);['fixes','chatbot'].forEach(view=>{const card=allCards.find(c=>c.dataset.view===view);card.style.flex='0 0 100%';container.appendChild(card);});});  
+    window.addEventListener('message',e=>{const m=e.data;if(m.command==='logUpdate'){const L=m.payload;const dot=document.getElementById('logStatus');const err=L.some(l=>/\bERROR\b/i.test(l));const wrn=!err&&L.some(l=>/\bWARN(?:ING)?\b/i.test(l));dot.className='status-dot';if(err)dot.classList.add('error');else if(wrn)dot.classList.add('warning');document.getElementById('logOutput').textContent=L.join('\n');return;}if(m.command==='updateData'&&!healthMode){setLoading(false);const d=m.payload;const outTb=document.querySelector('#outdatedTable tbody');outTb.innerHTML='';Object.entries(d.outdated||{}).forEach(([pkg,info])=>{const r=outTb.insertRow();r.innerHTML=`<td><span class="status ${info.status}"></span></td><td>${pkg}</td><td>${info.current}</td><td>${info.latest}</td>`;});const vulTb=document.querySelector('#vulnTable tbody');vulnTb.innerHTML='';if(d.vulnError){const r=vulnTb.insertRow();r.innerHTML=`<td colspan="3" style="color:tomato;">${d.vulnError}</td>`;}else{Object.entries(d.vuln||{}).forEach(([pkg,list])=>list.forEach(v=>{const r=vulnTb.insertRow();r.innerHTML=`<td>${pkg}</td><td>${v.severity}</td><td>${v.title}</td>`;}));}const licTb=document.querySelector('#licenseTable tbody');licTb.innerHTML='';(d.licenseIssues||[]).forEach(x=>{const r=licTb.insertRow();r.innerHTML=`<td>${x.pkg}</td><td>${x.licenses.join(', ')}</td>`;});const esTb=document.querySelector('#eslintTable tbody');esTb.innerHTML='';(d.eslintDetails||[]).forEach(e2=>{const r=esTb.insertRow();r.innerHTML=`<td>${e2.file}</td><td>${e2.line}</td><td>${e2.rule}</td><td>${e2.message}</td>`;});const dupTb=document.querySelector('#dupTable tbody');dupTb.innerHTML='';(d.duplicationDetails||[]).forEach(dd=>{const r=dupTb.insertRow();r.innerHTML=`<td>${dd.fileA}</td><td>${dd.lineA}</td><td>${dd.fileB}</td><td>${dd.lineB}</td>`;});const compData=d.complexity||[];const labels=compData.map(c=>c.path.split(/[\\/]/).pop());const cyclo=compData.map(c=>c.aggregate.cyclomatic);const sloc=compData.map(c=>c.aggregate.sloc);const maint=compData.map(c=>c.aggregate.maintainability);const ctx1=document.getElementById('complexityChart').getContext('2d');complexityChart?.destroy();complexityChart=new Chart(ctx1,{type:'bar',data:{labels:labels,datasets:[{label:'Cyclomatic',data:cyclo},{label:'SLOC',data:sloc},{label:'Maintainability',data:maint}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#fff'}}},scales:{x:{beginAtZero:true,ticks:{color:'#fff',stepSize:1},grid:{color:'rgba(255,255,255,0.1)'}},y:{ticks:{color:'#fff',autoSkip:false},grid:{display:false}}}}});const secTb=document.querySelector('#secretTable tbody');secTb.innerHTML='';(d.secrets||[]).forEach(s=>{const r=secTb.insertRow();r.innerHTML=`<td>${s.file}</td><td>${s.line}</td><td>${s.rule}</td><td>${s.match}</td>`;});const dgLabels=Object.keys(d.depGraph||{});const dgShort=dgLabels.map(l=>l.split(/[\\/]/).pop());const dgValues=dgLabels.map(pkg=>parseInt((d.depGraph[pkg].version||'0').split('.')[0],10)||0);const ctx2=document.getElementById('dep-graph').getContext('2d');depChart?.destroy();depChart=new Chart(ctx2,{type:'bar',data:{labels:dgShort,datasets:[{label:'Version (major)',data:dgValues}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#fff'}}},scales:{x:{beginAtZero:true,ticks:{color:'#fff',stepSize:1},grid:{color:'rgba(255,255,255,0.1)'}},y:{ticks:{color:'#fff',autoSkip:false},grid:{display:false}}}}});document.getElementById('sonarOutput').textContent=d.sonarResult.summary;const mc=document.getElementById('sonarMetrics');const m2=d.sonarResult.metrics||{};mc.innerHTML=`<div class="metrics-container"><div class="card"><div class="card-title">🐞 Bugs</div><div class="card-value">${m2.bugs||'—'}</div></div><div class="card"><div class="card-title">🔒 Vulnerabilities</div><div class="card-value">${m2.vulnerabilities||'—'}</div></div><div class="card"><div class="card-title">🛠 Code Smells</div><div class="card-value">${m2.code_smells||'—'}</div></div><div class="card"><div class="card-title">🧪 Coverage</div><div class="card-value">${m2.coverage||'—'}</div></div><div class="card"><div class="card-title">🔁 Duplication %</div><div class="card-value">${m2.duplicated_lines_density||'—'}</div></div></div>`;(d.chatHistory||[]).forEach(c3=>{const time=c3.time||new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});appendMessage(c3.from,c3.text,time);});const fixTb=document.querySelector('#fixTable tbody');fixTb.innerHTML='';(d.suggestedFixes||[]).forEach(f=>{const r=fixTb.insertRow();r.innerHTML=`<td>${f.pkg}</td><td>${f.fix}</td>`;});}});
+    window.onload=()=>{setLoading(true);vscode.postMessage({command:'refresh'});document.getElementById('scanAll').click();};
   </script>
 </body>
 </html>
