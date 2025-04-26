@@ -23,8 +23,8 @@
     #viewSelect,#scanView,#scanAll{padding:0.5rem;border-radius:var(--radius);border:none;background:var(--card-bg);color:var(--text-light);cursor:pointer}
     #viewSelect:hover,#scanView:hover,#scanAll:hover{background:rgba(255,255,255,0.1)}
     #viewSelect option{background:var(--card-bg);color:var(--text-light)}
-    section#cards{flex:1;display:flex;flex-wrap:wrap;gap:var(--gap);padding:var(--gap);overflow:auto;background:var(--bg-dark)}
-    .card{background:var(--card-bg);border-radius:var(--radius);box-shadow:0 4px 12px var(--shadow);flex:1 1 calc(33% - var(--gap));min-width:260px;display:flex;flex-direction:column;transition:transform .2s}
+    section#cards{flex:1;display:flex;flex-wrap:wrap;gap:var(--gap);padding:var(--gap);overflow:auto;background:var(--bg-dark);   grid-auto-rows: 350px;}
+    .card{background:var(--card-bg);border-radius:var(--radius);box-shadow:0 4px 12px var(--shadow);flex:1 1 calc(33% - var(--gap));min-width:260px;display:flex;flex-direction:column;transition:transform .2s;  height: 50%;}
     .card:hover{transform:translateY(-6px)}
       .card .content {
     flex: 1 1 auto;
