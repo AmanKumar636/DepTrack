@@ -22,12 +22,27 @@ const forbiddenLicenses = ['GPL','AGPL','LGPL','PROPRIETARY','UNKNOWN'];
 
 let panel;
 let refreshInterval;
-let latestPayload = null;
 let chatHistory = [];
 let outputChannel;
 let logLines = [];
 const toolExists = {};
 let isScanning = false;
+
+
+let latestPayload = {
+  outdated: {},
+  vuln: {},
+  vulnError: null,
+  licenseIssues: [],
+  eslintDetails: [],
+  sonarResult: {},
+  complexity: [],
+  duplicationDetails: [],
+  secrets: [],
+  depGraph: {},
+  chatHistory: [],
+  suggestedFixes: []
+};
 
 function logError(fnName, err) {
   const msg = stripAnsi(err.stack || err.message || err);
@@ -190,11 +205,43 @@ async function activate(context) {
           { enableScripts: true, localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, 'src'))] }
         );
         panel.webview.html = fs.readFileSync(path.join(context.extensionPath, 'src', 'dashboard.html'), 'utf8');
-        panel.webview.onDidReceiveMessage(onWebviewMessage, null, context.subscriptions);
+panel.webview.onDidReceiveMessage(msg => {
+  switch (msg.command) {
+    case 'refreshOutdated':
+      runOutdated();
+      break;
+    case 'refreshVuln':
+      runVuln();
+      break;
+    case 'refreshLicense':
+      runLicenses();
+      break;
+    case 'refreshEslint':
+      runESLint();
+      break;
+    case 'refreshDuplication':
+      runDuplication();
+      break;
+    case 'refreshComplexity':
+      runComplexity();
+      break;
+    case 'refreshSecret':
+      runSecrets();
+      break;
+    case 'refreshDepgraph':
+      runDepGraph();
+      break;
+    case 'refreshFixes':
+      runFixes();
+      break;
+    case 'refreshSonar':
+      runSonar();
+      break;
+  }
+});
+
         panel.onDidDispose(() => { panel = null; }, null, context.subscriptions);
       }
-      // Run all checks once when the dashboard is opened
-      runAllChecks();
     })
   );
 
@@ -203,9 +250,9 @@ async function activate(context) {
     vscode.commands.registerCommand('Aman.deptrack.refresh', runAllChecks)
   );
 
-  // Other commands (healthCheck, sendEmail, exportCSV, exportPDF, chat)
+  // Other commands (sendEmail, exportCSV, exportPDF, chat)
   context.subscriptions.push(
-    vscode.commands.registerCommand('Aman.deptrack.healthCheck', runHealthCheck),
+
     vscode.commands.registerCommand('Aman.deptrack.sendEmail', args => sendEmailNotification('DepTrack Alert', 'See report.', args)),
     vscode.commands.registerCommand('Aman.deptrack.exportCSV', exportCsv),
     vscode.commands.registerCommand('Aman.deptrack.exportPDF', exportPdf),
@@ -223,7 +270,6 @@ async function onWebviewMessage(msg) {
     case 'refresh': return runAllChecks();
     case 'scanView': return runAllChecks();
     case 'scanAll': return runAllChecks();
-    case 'healthCheck': return runHealthCheck();
     case 'sendEmail': return sendEmailNotification('DepTrack Alert', 'See report.', msg.email);
     case 'exportCSV': return exportCsv();
     case 'exportPDF': return exportPdf();
@@ -247,15 +293,6 @@ async function runAllChecks() {
   outputChannel.show(true);
   outputChannel.appendLine('runAllChecks start');
 
-  let outdated = {};
-  let vulnPayload = { data: {}, error: null };
-  let licenseIssues = [];
-  let eslintDetails = [];
-  let sonarResult = {};
-  let complexity = [];
-  let duplicationDetails = [];
-  let secrets = [];
-  let depGraph = {};
 
   outputChannel.appendLine('-> checkOutdated');
   try {
@@ -354,6 +391,237 @@ async function runAllChecks() {
   outputChannel.appendLine('runAllChecks done');
   isScanning = false;
 }
+
+
+
+async function runOutdated() {
+  if (isScanning) return;
+  isScanning = true;
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!ws) {
+    vscode.window.showErrorMessage('Open a workspace first');
+    isScanning = false;
+    return;
+  }
+  outputChannel.show(true);
+  outputChannel.appendLine('runOutdated start');
+  try {
+    const outdated = await checkOutdated(ws);
+    latestPayload.outdated = outdated;
+    panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
+  } catch (e) {
+    logError('runOutdated', e);
+  }
+  outputChannel.appendLine('runOutdated done');
+  isScanning = false;
+}
+
+async function runVuln() {
+  if (isScanning) return;
+  isScanning = true;
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!ws) {
+    vscode.window.showErrorMessage('Open a workspace first');
+    isScanning = false;
+    return;
+  }
+  outputChannel.show(true);
+  outputChannel.appendLine('runVuln start');
+  try {
+    const vulnPayload = await checkVuln(ws);
+    latestPayload.vuln = vulnPayload.data;
+    latestPayload.vulnError = vulnPayload.error;
+    panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
+  } catch (e) {
+    logError('runVuln', e);
+  }
+  outputChannel.appendLine('runVuln done');
+  isScanning = false;
+}
+
+async function runLicenses() {
+  if (isScanning) return;
+  isScanning = true;
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!ws) {
+    vscode.window.showErrorMessage('Open a workspace first');
+    isScanning = false;
+    return;
+  }
+  outputChannel.show(true);
+  outputChannel.appendLine('runLicenses start');
+  try {
+    const licenseIssues = await checkLicenses(ws);
+    latestPayload.licenseIssues = licenseIssues;
+    panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
+  } catch (e) {
+    logError('runLicenses', e);
+  }
+  outputChannel.appendLine('runLicenses done');
+  isScanning = false;
+}
+
+async function runESLint() {
+  if (isScanning) return;
+  isScanning = true;
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!ws) {
+    vscode.window.showErrorMessage('Open a workspace first');
+    isScanning = false;
+    return;
+  }
+  outputChannel.show(true);
+  outputChannel.appendLine('runESLint start');
+  try {
+    const eslintDetails = await checkESLint(ws);
+    latestPayload.eslintDetails = eslintDetails;
+    panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
+  } catch (e) {
+    logError('runESLint', e);
+  }
+  outputChannel.appendLine('runESLint done');
+  isScanning = false;
+}
+
+async function runSonar() {
+  if (isScanning) return;
+  isScanning = true;
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!ws) {
+    vscode.window.showErrorMessage('Open a workspace first');
+    isScanning = false;
+    return;
+  }
+  outputChannel.show(true);
+  outputChannel.appendLine('runSonar start');
+  try {
+    const sonarResult = await checkSonar(ws);
+    latestPayload.sonarResult = sonarResult;
+    panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
+  } catch (e) {
+    logError('runSonar', e);
+  }
+  outputChannel.appendLine('runSonar done');
+  isScanning = false;
+}
+
+async function runComplexity() {
+  if (isScanning) return;
+  isScanning = true;
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!ws) {
+    vscode.window.showErrorMessage('Open a workspace first');
+    isScanning = false;
+    return;
+  }
+  outputChannel.show(true);
+  outputChannel.appendLine('runComplexity start');
+  try {
+    const complexity = await checkComplexity(ws);
+    latestPayload.complexity = complexity;
+    panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
+  } catch (e) {
+    logError('runComplexity', e);
+  }
+  outputChannel.appendLine('runComplexity done');
+  isScanning = false;
+}
+
+async function runDuplication() {
+  if (isScanning) return;
+  isScanning = true;
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!ws) {
+    vscode.window.showErrorMessage('Open a workspace first');
+    isScanning = false;
+    return;
+  }
+  outputChannel.show(true);
+  outputChannel.appendLine('runDuplication start');
+  try {
+    const duplicationDetails = await checkDuplication(ws);
+    latestPayload.duplicationDetails = duplicationDetails;
+    panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
+  } catch (e) {
+    logError('runDuplication', e);
+  }
+  outputChannel.appendLine('runDuplication done');
+  isScanning = false;
+}
+
+async function runSecrets() {
+  if (isScanning) return;
+  isScanning = true;
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!ws) {
+    vscode.window.showErrorMessage('Open a workspace first');
+    isScanning = false;
+    return;
+  }
+  outputChannel.show(true);
+  outputChannel.appendLine('runSecrets start');
+  try {
+    const secrets = await scanSecrets(ws);
+    latestPayload.secrets = secrets;
+    panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
+  } catch (e) {
+    logError('runSecrets', e);
+  }
+  outputChannel.appendLine('runSecrets done');
+  isScanning = false;
+}
+
+async function runDepGraph() {
+  if (isScanning) return;
+  isScanning = true;
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!ws) {
+    vscode.window.showErrorMessage('Open a workspace first');
+    isScanning = false;
+    return;
+  }
+  outputChannel.show(true);
+  outputChannel.appendLine('runDepGraph start');
+  try {
+    const depGraph = await checkDepGraph(ws);
+    latestPayload.depGraph = depGraph;
+    panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
+  } catch (e) {
+    logError('runDepGraph', e);
+  }
+  outputChannel.appendLine('runDepGraph done');
+  isScanning = false;
+}
+
+async function runFixes() {
+  if (isScanning) return;
+  isScanning = true;
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!ws) {
+    vscode.window.showErrorMessage('Open a workspace first');
+    isScanning = false;
+    return;
+  }
+  outputChannel.show(true);
+  outputChannel.appendLine('runFixes start');
+  try {
+    const fixes = await getSuggestedFixes({
+      outdated: latestPayload.outdated,
+      vuln: latestPayload.vuln,
+      licenseIssues: latestPayload.licenseIssues,
+      eslintDetails: latestPayload.eslintDetails,
+      duplicationDetails: latestPayload.duplicationDetails,
+      secrets: latestPayload.secrets
+    });
+    latestPayload.suggestedFixes = fixes;
+    panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
+  } catch (e) {
+    logError('runFixes', e);
+  }
+  outputChannel.appendLine('runFixes done');
+  isScanning = false;
+}
+
 
 // Updated checkOutdated: treats npm outdated exit-code 1 as normal, cleans up logging
 async function checkOutdated(ws) {
@@ -522,7 +790,7 @@ async function checkESLint(ws) {
 
   // 1) Glob patterns and ignore folders
   const patterns = ['**/*.{js,jsx,ts,tsx}'];
-  const ignore   = ['node_modules/**', 'dist/**', 'report/**', 'coverage/**', 'deptrack/**', 'media/**'];
+  const ignore   = ['node_modules/**', 'dist/**', 'report/**', 'coverage/**', 'deptrack/**', 'media/**', 'cleaned/**'];
   outputChannel.appendLine(`[ESLint] glob patterns: ${patterns}`);
   outputChannel.appendLine(`[ESLint] ignores: ${ignore}`);
 
@@ -959,21 +1227,6 @@ async function getSuggestedFixes({
   return fixes;
 }
 
-
-async function runHealthCheck() {
-  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!ws) return;
-  try {
-    await Promise.all([
-      toolExists.npm    && execP(`${resolveCmd(ws,'npm')} outdated --json`, { cwd: ws }),
-      toolExists.snyk   && execP(`${resolveCmd(ws,'snyk')} test --json`, { cwd: ws }),
-      execP('eslint . -f json', { cwd: ws })
-    ]);
-    vscode.window.showInformationMessage('DepTrack: All systems go');
-  } catch (e) {
-    logError('runHealthCheck', e);
-  }
-}
 
 
 async function sendEmailNotification(subject, text, overrideTo) {
