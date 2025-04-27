@@ -20,3 +20,5 @@ snyk.exesecret.js
 .scannerwork/
 "snyk.exe" 
 "snyk.exe" 
+"path/to/snyk.exe" 
+"C:/DepTrack/snyk.exe" 
