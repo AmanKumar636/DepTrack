@@ -249,8 +249,13 @@ async function activate(context) {
         'utf8'
       );
 
+      // Dummy test message for debugging
+      console.log('⏪ Sending test to webview');
+      panel.webview.postMessage({ command: 'chatResponse', text: '🔥 Test message!' });
+
       // 4) Handle messages from the webview
       panel.webview.onDidReceiveMessage(async m => {
+        console.log('⏩ webview message received:', m);
         if (m.command === 'chat') {
           const userText = m.text?.trim();
           if (!userText) {
@@ -262,8 +267,9 @@ async function activate(context) {
           }
 
           try {
-            // Use free HF API
+            console.log('🕵️ User text:', userText);
             const botText = await getFreeChatResponse(userText);
+            console.log('⏪ send to webview:', botText);
             panel.webview.postMessage({
               command: 'chatResponse',
               text: botText
@@ -308,6 +314,8 @@ async function activate(context) {
     .catch(err => outputChannel.appendLine('activate error: ' + err.message));
 }
 
+exports.activate = activate;
+
 
 function deactivate() {
   panel = null;
@@ -316,6 +324,7 @@ function deactivate() {
 
 
 async function getFreeChatResponse(prompt) {
+  console.log('🕵️ Sending to HF API:', prompt);
   const res = await fetch(HF_URL, {
     method:  'POST',
     headers: {
@@ -324,15 +333,14 @@ async function getFreeChatResponse(prompt) {
     },
     body: JSON.stringify({ inputs: prompt }),
   });
-  if (!res.ok) {
-    throw new Error(`HF API error: ${res.statusText}`);
-  }
+  if (!res.ok) throw new Error(`Service error: ${res.statusText}`);
   const json = await res.json();
-  // DialoGPT returns an array of possible generations; pick the first:
   return Array.isArray(json) && json[0]?.generated_text
-       ? json[0].generated_text
-       : 'Sorry, I didn’t get that.';
+    ? json[0].generated_text
+    : 'Sorry, I didn\'t get that.';
 }
+
+
 async function runAllChecks() {
   if (isScanning) return;
   isScanning = true;
@@ -1207,30 +1215,6 @@ async function checkDuplication(ws) {
   return res;
 }
 
-async function handleChat(text) {
-  chatHistory.push({ from: 'You', text });
-  const cfg    = vscode.workspace.getConfiguration('deptrack.chatbot');
-  const apiKey = cfg.get('apiKey');
-  const model  = cfg.get('model') || 'gpt-3.5-turbo';
-  let reply = '';
-  if (!apiKey) {
-    reply = '❌ Set API key';
-  } else {
-    try {
-      const res = await axios.post(
-        'https://api.openai.com/v1/chat/completions',
-        { model, messages: [{ role: 'user', content: text }] },
-        { headers: { Authorization: `Bearer ${apiKey}` } }
-      );
-      reply = res.data.choices[0].message.content.trim();
-    } catch (e) {
-      logError('handleChat', e);
-      reply = '❌ Chat error';
-    }
-  }
-  chatHistory.push({ from: 'Bot', text: reply });
-  panel && panel.webview.postMessage({ command: 'chatResponse', payload: { text: reply } });
-}
 
 async function getSuggestedFixes({
   outdated = {},
