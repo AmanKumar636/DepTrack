@@ -12,6 +12,15 @@ const stripAnsi = require('strip-ansi').default || require('strip-ansi');
 const { ESLint } = require('eslint');
 const fg = require('fast-glob');
 require('dotenv').config()
+const { Configuration, OpenAIApi } = require('openai');
+const fetch = require('node-fetch');
+
+const HF_HUB_TOKEN = process.env.HF_HUB_TOKEN;
+if (!HF_HUB_TOKEN) {
+  console.warn('⚠️  HF_HUB_TOKEN is not set! Check your .env.');
+}
+const HF_MODEL      = 'microsoft/DialoGPT-medium';
+const HF_URL        = `https://api-inference.huggingface.co/models/${HF_MODEL}`;
 
 
 const patterns = [
@@ -19,6 +28,11 @@ const patterns = [
   { name: 'Private Key', regex: /-----BEGIN PRIVATE KEY-----/g }
 ];
 const forbiddenLicenses = ['GPL','AGPL','LGPL','PROPRIETARY','UNKNOWN'];
+const OPENAI_KEY = 'OPENAI_API_KEY';
+const { OpenAI } = require('openai');
+
+
+
 
 let panel;
 let refreshInterval;
@@ -27,7 +41,7 @@ let outputChannel;
 let logLines = [];
 const toolExists = {};
 let isScanning = false;
-
+let sessionHistory = [];
 
 let latestPayload = {
   outdated: {},
@@ -184,6 +198,7 @@ function deactivate() {
 const abortControllers = {};
 
 async function activate(context) {
+  // 1) Create and wrap your output channel for logging
   outputChannel = vscode.window.createOutputChannel('DepTrack');
   const orig = outputChannel.appendLine.bind(outputChannel);
   outputChannel.appendLine = line => {
@@ -194,192 +209,130 @@ async function activate(context) {
   };
   outputChannel.appendLine('activate start');
 
-  // Command to open the dashboard webview
+  // 2) Allow the user to optionally store an OpenAI key (chat will fall back to HF)
   context.subscriptions.push(
-    vscode.commands.registerCommand('Aman.deptrack.openDashboard', () => {
-      if (!panel) {
-        panel = vscode.window.createWebviewPanel(
-          'deptrackDashboard',
-          'DepTrack Dashboard',
-          vscode.ViewColumn.One,
-          {
-            enableScripts: true,
-            localResourceRoots: [
-              vscode.Uri.file(path.join(context.extensionPath, 'src'))
-            ]
-          }
-        );
-        webviewPanel = panel;
-        panel.webview.html = fs.readFileSync(
-          path.join(context.extensionPath, 'src', 'dashboard.html'),
-          'utf8'
-        );
-
-        panel.webview.onDidReceiveMessage(async msg => {
-          outputChannel.appendLine(`Received command: ${msg.command}`);
-          try {
-            switch (msg.command) {
-              // Bulk scans
-              case 'refresh':
-              case 'scanAll':
-                return withAbort('all', runAllChecks);
-              case 'scanView':
-                return runView(msg.view);
-
-              // Send email
-              case 'sendEmail': {
-                const cfg = vscode.workspace.getConfiguration('deptrack.email');
-                const to = msg.email || cfg.get('to');
-                await sendEmailNotification(
-                  'DepTrack Scan Results',
-                  'Your dependency scan has completed. See your dashboard for details.',
-                  to
-                );
-                break;
-              }
-
-              // Send PDF report
-              case 'sendReportEmail': {
-                const wf = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-                if (!wf) {
-                  webviewPanel.webview.postMessage({
-                    command: 'emailStatus',
-                    success: false,
-                    error: 'No workspace open'
-                  });
-                  break;
-                }
-                const pdfPath = path.join(wf, 'deptrack-report.pdf');
-                if (!fs.existsSync(pdfPath)) {
-                  webviewPanel.webview.postMessage({
-                    command: 'emailStatus',
-                    success: false,
-                    error: 'deptrack-report.pdf not found in workspace root'
-                  });
-                  break;
-                }
-                const cfg = vscode.workspace.getConfiguration('deptrack.email');
-                const to = cfg.get('to');
-                await sendEmailNotification(
-                  'DepTrack PDF Report',
-                  'Attached is the latest DepTrack PDF report.',
-                  to,
-                  [{ filename: 'deptrack-report.pdf', path: pdfPath }]
-                );
-                break;
-              }
-
-case 'sendCsvReportEmail': {
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!workspaceRoot) {
-    webviewPanel.webview.postMessage({
-      command: 'emailStatus',
-      success: false,
-      error: 'No workspace open'
-    });
-    break;
-  }
-  const csvPath = path.join(workspaceRoot, 'deptrack-report.csv');
-  if (!fs.existsSync(csvPath)) {
-    webviewPanel.webview.postMessage({
-      command: 'emailStatus',
-      success: false,
-      error: 'deptrack-report.csv not found in workspace root'
-    });
-    break;
-  }
-  const cfg = vscode.workspace.getConfiguration('deptrack.email');
-  const to = cfg.get('to');
-  await sendEmailNotification(
-    'DepTrack CSV Report',
-    'Attached is the latest DepTrack CSV report.',
-    to,
-    [{ filename: 'deptrack-report.csv', path: csvPath }]
-  );
-  break;
-}
-
-              // Exports & chat
-              case 'exportCSV': return exportCsv();
-              case 'exportPDF': return exportPdf();
-              case 'chat':      return handleChat(msg.text);
-
-              // Individual refresh
-              case 'refreshOutdated':    return withAbort('outdated', runOutdated);
-              case 'refreshVuln':        return withAbort('vuln', runVuln);
-              case 'refreshLicense':     return withAbort('license', runLicenses);
-              case 'refreshEslint':      return withAbort('eslint', runESLint);
-              case 'refreshDuplication': return withAbort('duplication', runDuplication);
-              case 'refreshComplexity':  return withAbort('complexity', runComplexity);
-              case 'refreshSecret':      return withAbort('secret', runSecrets);
-              case 'refreshDepgraph':    return withAbort('depgraph', runDepGraph);
-              case 'refreshFixes':       return withAbort('fixes', runFixes);
-              case 'refreshSonar':       return withAbort('sonar', runSonar);
-
-              // Cancellation
-              case 'cancelAll':        abortControllers.all?.abort(); break;
-              case 'cancelOutdated':   abortControllers.outdated?.abort(); break;
-              case 'cancelVuln':       abortControllers.vuln?.abort(); break;
-              case 'cancelLicense':    abortControllers.license?.abort(); break;
-              case 'cancelEslint':     abortControllers.eslint?.abort(); break;
-              case 'cancelDuplication':abortControllers.duplication?.abort(); break;
-              case 'cancelComplexity': abortControllers.complexity?.abort(); break;
-              case 'cancelSecret':     abortControllers.secret?.abort(); break;
-              case 'cancelDepgraph':   abortControllers.depgraph?.abort(); break;
-              case 'cancelFixes':      abortControllers.fixes?.abort(); break;
-              case 'cancelSonar':      abortControllers.sonar?.abort(); break;
-
-              default:
-                outputChannel.appendLine(`Unknown command: ${msg.command}`);
-            }
-          } catch (err) {
-            console.error('[DepTrack] handler error:', err);
-            webviewPanel.webview.postMessage({
-              command: 'emailStatus',
-              success: false,
-              error: err.message
-            });
-          }
-        });
-
-        panel.onDidDispose(() => {
-          panel = null;
-          webviewPanel = null;
-        }, null, context.subscriptions);
+    vscode.commands.registerCommand('Aman.deptrack.setOpenAIKey', async () => {
+      const key = await vscode.window.showInputBox({
+        prompt: 'Enter your OpenAI API key (optional)',
+        ignoreFocusOut: true,
+        password: true
+      });
+      if (key) {
+        await context.secrets.store(OPENAI_SECRET, key);
+        vscode.window.showInformationMessage('✅ OpenAI key saved');
+      } else {
+        vscode.window.showInformationMessage('Chat will use free Hugging Face API');
       }
     })
   );
 
-  // Shortcut commands
+  // 3) Open the Dashboard panel
+  context.subscriptions.push(
+    vscode.commands.registerCommand('Aman.deptrack.openDashboard', async () => {
+      if (panel) {
+        panel.reveal();
+        return;
+      }
+
+      panel = vscode.window.createWebviewPanel(
+        'deptrackDashboard',
+        'DepTrack Dashboard',
+        vscode.ViewColumn.One,
+        {
+          enableScripts: true,
+          localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, 'src'))]
+        }
+      );
+
+      panel.webview.html = fs.readFileSync(
+        path.join(context.extensionPath, 'src', 'dashboard.html'),
+        'utf8'
+      );
+
+      // 4) Handle messages from the webview
+      panel.webview.onDidReceiveMessage(async m => {
+        if (m.command === 'chat') {
+          const userText = m.text?.trim();
+          if (!userText) {
+            panel.webview.postMessage({
+              command: 'chatResponse',
+              text: 'Please enter a message.'
+            });
+            return;
+          }
+
+          try {
+            // Use free HF API
+            const botText = await getFreeChatResponse(userText);
+            panel.webview.postMessage({
+              command: 'chatResponse',
+              text: botText
+            });
+          } catch (err) {
+            console.error('Chat error:', err);
+            panel.webview.postMessage({
+              command: 'chatResponse',
+              text: '😞 Something went wrong.'
+            });
+          }
+        }
+      });
+
+      panel.onDidDispose(() => {
+        panel = null;
+      }, null, context.subscriptions);
+    })
+  );
+
+  // 5) Register other commands (unchanged)
   context.subscriptions.push(
     vscode.commands.registerCommand('Aman.deptrack.refresh', () =>
       withAbort('all', runAllChecks)
     ),
     vscode.commands.registerCommand('Aman.deptrack.sendReportEmail', () =>
-      vscode.commands
-        .executeCommand('Aman.deptrack.openDashboard')
-        .then(() => panel.webview.postMessage({ command: 'sendReportEmail' }))
+      vscode.commands.executeCommand('Aman.deptrack.openDashboard').then(() =>
+        panel.webview.postMessage({ command: 'sendReportEmail' })
+      )
+    ),
+    vscode.commands.registerCommand('Aman.deptrack.sendCsvReportEmail', () =>
+      vscode.commands.executeCommand('Aman.deptrack.openDashboard').then(() =>
+        panel.webview.postMessage({ command: 'sendCsvReportEmail' })
+      )
     )
   );
 
-context.subscriptions.push(
-  vscode.commands.registerCommand('Aman.deptrack.sendCsvReportEmail', () =>
-    vscode.commands.executeCommand('Aman.deptrack.openDashboard').then(() =>
-      panel.webview.postMessage({ command: 'sendCsvReportEmail' })
-    )
-  )
-);
-
-  // Open dashboard on startup
-  vscode.commands.executeCommand('Aman.deptrack.openDashboard');
-  outputChannel.appendLine('activate done');
+  // 6) Finally, launch the dashboard and log completion
+  vscode.commands
+    .executeCommand('Aman.deptrack.openDashboard')
+    .then(() => outputChannel.appendLine('activate done'))
+    .catch(err => outputChannel.appendLine('activate error: ' + err.message));
 }
+
 
 function deactivate() {
   panel = null;
   webviewPanel = null;
 }
 
+
+async function getFreeChatResponse(prompt) {
+  const res = await fetch(HF_URL, {
+    method:  'POST',
+    headers: {
+      'Authorization': `Bearer ${HF_HUB_TOKEN}`,
+      'Content-Type':  'application/json'
+    },
+    body: JSON.stringify({ inputs: prompt }),
+  });
+  if (!res.ok) {
+    throw new Error(`HF API error: ${res.statusText}`);
+  }
+  const json = await res.json();
+  // DialoGPT returns an array of possible generations; pick the first:
+  return Array.isArray(json) && json[0]?.generated_text
+       ? json[0].generated_text
+       : 'Sorry, I didn’t get that.';
+}
 async function runAllChecks() {
   if (isScanning) return;
   isScanning = true;
