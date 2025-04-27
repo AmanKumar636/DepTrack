@@ -323,6 +323,10 @@ function capitalize(s) {
     document.getElementById('scanAll').addEventListener('click',()=>{healthMode=false;container.style.flexWrap='wrap';container.innerHTML='';allCards.filter(c=>!['sonar','chatbot','fixes'].includes(c.dataset.view)).forEach(c=>{c.style.flex='1 1 calc(33% - var(--gap))';container.appendChild(c);});const sonarCard=allCards.find(c=>c.dataset.view==='sonar');sonarCard.style.flex='0 0 100%';container.appendChild(sonarCard);['fixes','chatbot'].forEach(view=>{const card=allCards.find(c=>c.dataset.view===view);card.style.flex='0 0 100%';container.appendChild(card);});});  
  window.addEventListener('message', e => {
   const m = e.data;
+   if (m.command === 'chatResponse') {
+      const time = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+      appendMessage('bot', m.text, time);
+   
   if (m.command === 'logUpdate') {
     const L = m.payload;
     const dot = document.getElementById('logStatus');
@@ -345,9 +349,6 @@ function capitalize(s) {
     setLoading(false);
     const d = m.payload;
 
-    if (m.command === 'chatResponse') {
-      const time = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-      appendMessage('bot', m.text, time);
     }
     const outTb = document.querySelector('#outdatedTable tbody');
     outTb.innerHTML = '';
