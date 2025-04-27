@@ -11,7 +11,7 @@ const semver = require('semver');
 const stripAnsi = require('strip-ansi').default || require('strip-ansi');
 const { ESLint } = require('eslint');
 const fg = require('fast-glob');
-
+require('dotenv').config()
 
 
 const patterns = [
@@ -181,101 +181,203 @@ function deactivate() {
   clearInterval(refreshInterval);
 }
 
+const abortControllers = {};
+
 async function activate(context) {
   outputChannel = vscode.window.createOutputChannel('DepTrack');
   const orig = outputChannel.appendLine.bind(outputChannel);
   outputChannel.appendLine = line => {
-    const time = new Date().toLocaleTimeString();
-    const entry = `[${time}] ${stripAnsi(line)}`;
+    const entry = `[${new Date().toLocaleTimeString()}] ${stripAnsi(line)}`;
     orig(entry);
     logLines.push(entry);
     panel?.webview.postMessage({ command: 'logUpdate', payload: logLines });
   };
   outputChannel.appendLine('activate start');
 
-  // Open Dashboard command: creates panel and runs a single scan
+  // Command to open the dashboard webview
   context.subscriptions.push(
     vscode.commands.registerCommand('Aman.deptrack.openDashboard', () => {
-      outputChannel.appendLine('command openDashboard');
       if (!panel) {
         panel = vscode.window.createWebviewPanel(
           'deptrackDashboard',
           'DepTrack Dashboard',
           vscode.ViewColumn.One,
-          { enableScripts: true, localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, 'src'))] }
+          {
+            enableScripts: true,
+            localResourceRoots: [
+              vscode.Uri.file(path.join(context.extensionPath, 'src'))
+            ]
+          }
         );
-        panel.webview.html = fs.readFileSync(path.join(context.extensionPath, 'src', 'dashboard.html'), 'utf8');
-panel.webview.onDidReceiveMessage(msg => {
-  switch (msg.command) {
-    case 'refreshOutdated':
-      runOutdated();
-      break;
-    case 'refreshVuln':
-      runVuln();
-      break;
-    case 'refreshLicense':
-      runLicenses();
-      break;
-    case 'refreshEslint':
-      runESLint();
-      break;
-    case 'refreshDuplication':
-      runDuplication();
-      break;
-    case 'refreshComplexity':
-      runComplexity();
-      break;
-    case 'refreshSecret':
-      runSecrets();
-      break;
-    case 'refreshDepgraph':
-      runDepGraph();
-      break;
-    case 'refreshFixes':
-      runFixes();
-      break;
-    case 'refreshSonar':
-      runSonar();
-      break;
-  }
-});
+        webviewPanel = panel;
+        panel.webview.html = fs.readFileSync(
+          path.join(context.extensionPath, 'src', 'dashboard.html'),
+          'utf8'
+        );
 
-        panel.onDidDispose(() => { panel = null; }, null, context.subscriptions);
+        panel.webview.onDidReceiveMessage(async msg => {
+          outputChannel.appendLine(`Received command: ${msg.command}`);
+          try {
+            switch (msg.command) {
+              // Bulk scans
+              case 'refresh':
+              case 'scanAll':
+                return withAbort('all', runAllChecks);
+              case 'scanView':
+                return runView(msg.view);
+
+              // Send email
+              case 'sendEmail': {
+                const cfg = vscode.workspace.getConfiguration('deptrack.email');
+                const to = msg.email || cfg.get('to');
+                await sendEmailNotification(
+                  'DepTrack Scan Results',
+                  'Your dependency scan has completed. See your dashboard for details.',
+                  to
+                );
+                break;
+              }
+
+              // Send PDF report
+              case 'sendReportEmail': {
+                const wf = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                if (!wf) {
+                  webviewPanel.webview.postMessage({
+                    command: 'emailStatus',
+                    success: false,
+                    error: 'No workspace open'
+                  });
+                  break;
+                }
+                const pdfPath = path.join(wf, 'deptrack-report.pdf');
+                if (!fs.existsSync(pdfPath)) {
+                  webviewPanel.webview.postMessage({
+                    command: 'emailStatus',
+                    success: false,
+                    error: 'deptrack-report.pdf not found in workspace root'
+                  });
+                  break;
+                }
+                const cfg = vscode.workspace.getConfiguration('deptrack.email');
+                const to = cfg.get('to');
+                await sendEmailNotification(
+                  'DepTrack PDF Report',
+                  'Attached is the latest DepTrack PDF report.',
+                  to,
+                  [{ filename: 'deptrack-report.pdf', path: pdfPath }]
+                );
+                break;
+              }
+
+case 'sendCsvReportEmail': {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    webviewPanel.webview.postMessage({
+      command: 'emailStatus',
+      success: false,
+      error: 'No workspace open'
+    });
+    break;
+  }
+  const csvPath = path.join(workspaceRoot, 'deptrack-report.csv');
+  if (!fs.existsSync(csvPath)) {
+    webviewPanel.webview.postMessage({
+      command: 'emailStatus',
+      success: false,
+      error: 'deptrack-report.csv not found in workspace root'
+    });
+    break;
+  }
+  const cfg = vscode.workspace.getConfiguration('deptrack.email');
+  const to = cfg.get('to');
+  await sendEmailNotification(
+    'DepTrack CSV Report',
+    'Attached is the latest DepTrack CSV report.',
+    to,
+    [{ filename: 'deptrack-report.csv', path: csvPath }]
+  );
+  break;
+}
+
+              // Exports & chat
+              case 'exportCSV': return exportCsv();
+              case 'exportPDF': return exportPdf();
+              case 'chat':      return handleChat(msg.text);
+
+              // Individual refresh
+              case 'refreshOutdated':    return withAbort('outdated', runOutdated);
+              case 'refreshVuln':        return withAbort('vuln', runVuln);
+              case 'refreshLicense':     return withAbort('license', runLicenses);
+              case 'refreshEslint':      return withAbort('eslint', runESLint);
+              case 'refreshDuplication': return withAbort('duplication', runDuplication);
+              case 'refreshComplexity':  return withAbort('complexity', runComplexity);
+              case 'refreshSecret':      return withAbort('secret', runSecrets);
+              case 'refreshDepgraph':    return withAbort('depgraph', runDepGraph);
+              case 'refreshFixes':       return withAbort('fixes', runFixes);
+              case 'refreshSonar':       return withAbort('sonar', runSonar);
+
+              // Cancellation
+              case 'cancelAll':        abortControllers.all?.abort(); break;
+              case 'cancelOutdated':   abortControllers.outdated?.abort(); break;
+              case 'cancelVuln':       abortControllers.vuln?.abort(); break;
+              case 'cancelLicense':    abortControllers.license?.abort(); break;
+              case 'cancelEslint':     abortControllers.eslint?.abort(); break;
+              case 'cancelDuplication':abortControllers.duplication?.abort(); break;
+              case 'cancelComplexity': abortControllers.complexity?.abort(); break;
+              case 'cancelSecret':     abortControllers.secret?.abort(); break;
+              case 'cancelDepgraph':   abortControllers.depgraph?.abort(); break;
+              case 'cancelFixes':      abortControllers.fixes?.abort(); break;
+              case 'cancelSonar':      abortControllers.sonar?.abort(); break;
+
+              default:
+                outputChannel.appendLine(`Unknown command: ${msg.command}`);
+            }
+          } catch (err) {
+            console.error('[DepTrack] handler error:', err);
+            webviewPanel.webview.postMessage({
+              command: 'emailStatus',
+              success: false,
+              error: err.message
+            });
+          }
+        });
+
+        panel.onDidDispose(() => {
+          panel = null;
+          webviewPanel = null;
+        }, null, context.subscriptions);
       }
     })
   );
 
-  // Manual refresh command
+  // Shortcut commands
   context.subscriptions.push(
-    vscode.commands.registerCommand('Aman.deptrack.refresh', runAllChecks)
+    vscode.commands.registerCommand('Aman.deptrack.refresh', () =>
+      withAbort('all', runAllChecks)
+    ),
+    vscode.commands.registerCommand('Aman.deptrack.sendReportEmail', () =>
+      vscode.commands
+        .executeCommand('Aman.deptrack.openDashboard')
+        .then(() => panel.webview.postMessage({ command: 'sendReportEmail' }))
+    )
   );
 
-  // Other commands (sendEmail, exportCSV, exportPDF, chat)
-  context.subscriptions.push(
+context.subscriptions.push(
+  vscode.commands.registerCommand('Aman.deptrack.sendCsvReportEmail', () =>
+    vscode.commands.executeCommand('Aman.deptrack.openDashboard').then(() =>
+      panel.webview.postMessage({ command: 'sendCsvReportEmail' })
+    )
+  )
+);
 
-    vscode.commands.registerCommand('Aman.deptrack.sendEmail', args => sendEmailNotification('DepTrack Alert', 'See report.', args)),
-    vscode.commands.registerCommand('Aman.deptrack.exportCSV', exportCsv),
-    vscode.commands.registerCommand('Aman.deptrack.exportPDF', exportPdf),
-    vscode.commands.registerCommand('Aman.deptrack.chat', args => handleChat(args))
-  );
-
-  // Open the dashboard (runs one scan via openDashboard handler)
+  // Open dashboard on startup
   vscode.commands.executeCommand('Aman.deptrack.openDashboard');
   outputChannel.appendLine('activate done');
 }
 
-async function onWebviewMessage(msg) {
-  outputChannel.appendLine(`onWebviewMessage ${msg.command}`);
-  switch (msg.command) {
-    case 'refresh': return runAllChecks();
-    case 'scanView': return runAllChecks();
-    case 'scanAll': return runAllChecks();
-    case 'sendEmail': return sendEmailNotification('DepTrack Alert', 'See report.', msg.email);
-    case 'exportCSV': return exportCsv();
-    case 'exportPDF': return exportPdf();
-    case 'chat': return handleChat(msg.text);
-    default: outputChannel.appendLine(`[onWebviewMessage] unknown: ${msg.command}`);
-  }
+function deactivate() {
+  panel = null;
+  webviewPanel = null;
 }
 
 async function runAllChecks() {
@@ -685,54 +787,69 @@ async function checkOutdated(ws) {
 
 
 // Updated checkVuln: treats Snyk exit-code 1 as normal, silences raw snippet logs
+
 async function checkVuln(ws) {
-  const fn = 'checkVuln';
-  const snyk = resolveCmd(ws, 'snyk');
-  const npm  = resolveCmd(ws, 'npm');
-  const res  = {};
-  let vulnError = null;
-  const pkgJson = path.join(ws, 'package.json');
+  const fn = 'checkVuln'
+  const snyk = resolveCmd(ws, 'snyk')
+  const npm  = resolveCmd(ws, 'npm')
+  const res  = {}
+  let vulnError = null
+  const pkgJson = path.join(ws, 'package.json')
 
   if (!fs.existsSync(pkgJson)) {
-    outputChannel.appendLine('[Vuln] skipped — no package.json');
-    return { data: res, error: null };
+    outputChannel.appendLine('[Vuln] skipped — no package.json')
+    return { data: res, error: null }
   }
 
-  outputChannel.appendLine('[Vuln] start');
-  let payload = null;
+  // pull the token from process.env (dotenv has already loaded it)
+  const token = process.env.SNYK_TOKEN
+  if (!token) {
+    outputChannel.appendLine('[Vuln] warning — SNYK_TOKEN not set in environment')
+  }
+
+  // common exec options, injecting our full process.env (which includes SNYK_TOKEN)
+  const execOpts = {
+    cwd: ws,
+    maxBuffer: 52428800,
+    env: { ...process.env }
+  }
+
+  outputChannel.appendLine('[Vuln] start')
+  let payload = null
 
   if (snyk) {
     try {
-      const { stdout } = await execP(`"${snyk}" test --json`, { cwd: ws, maxBuffer: 52428800 });
-      payload = JSON.parse(stdout);
+      // The Snyk CLI will automatically read SNYK_TOKEN from the environment
+      const { stdout } = await execP(`"${snyk}" test --json`, execOpts)
+      payload = JSON.parse(stdout)
     } catch (e) {
-      const raw = e.stdout || '';
+      const raw = e.stdout || ''
       if (raw) {
         try {
-          payload = JSON.parse(raw);
+          payload = JSON.parse(raw)
         } catch (pe) {
-          vulnError = `Snyk JSON parse failed: ${pe.message}`;
+          vulnError = `Snyk JSON parse failed: ${pe.message}`
         }
       } else {
-        vulnError = `Snyk failed: ${stripAnsi(e.stderr || e.message)}`;
+        vulnError = `Snyk failed: ${stripAnsi(e.stderr || e.message)}`
       }
     }
   }
 
   if (!payload && npm) {
     try {
-      const { stdout } = await execP(`"${npm}" audit --json`, { cwd: ws, maxBuffer: 52428800 });
-      payload = JSON.parse(stdout);
+      const { stdout } = await execP(`"${npm}" audit --json`, execOpts)
+      payload = JSON.parse(stdout)
     } catch (e) {
-      const raw = e.stdout || '';
+      const raw = e.stdout || ''
       if (raw) {
         try {
-          payload = JSON.parse(raw);
+          payload = JSON.parse(raw)
         } catch (pe) {
-          vulnError = `npm audit JSON parse failed: ${pe.message}`;
+          vulnError = `npm audit JSON parse failed: ${pe.message}`
         }
       } else {
-        vulnError = `npm audit failed: ${stripAnsi(e.stderr || e.message)}`;
+        vulnError = `npm audit failed: ${stripAnsi(e.stderr || e.message)}`
       }
     }
   }
@@ -740,23 +857,23 @@ async function checkVuln(ws) {
   if (payload && typeof payload === 'object') {
     const list = Array.isArray(payload.vulnerabilities)
                ? payload.vulnerabilities
-               : Object.values(payload.vulnerabilities || {});
-    outputChannel.appendLine(`[Vuln] total vulnerabilities: ${list.length}`);
+               : Object.values(payload.vulnerabilities || {})
+    outputChannel.appendLine(`[Vuln] total vulnerabilities: ${list.length}`)
     for (const v of list) {
-      const pkgName = v.packageName || v.name || v.module_name;
-      const severity = (v.severity || v.cvssScore || 'unknown').toString().toLowerCase();
-      const title    = v.title || v.overview || '';
-      (res[pkgName] ||= []).push({ severity, title });
+      const pkgName = v.packageName || v.name || v.module_name
+      const severity = (v.severity || v.cvssScore || 'unknown').toString().toLowerCase()
+      const title    = v.title || v.overview || ''
+      ;(res[pkgName] ||= []).push({ severity, title })
     }
   } else if (vulnError) {
-    outputChannel.appendLine(`[Vuln] error: ${vulnError}`);
+    outputChannel.appendLine(`[Vuln] error: ${vulnError}`)
   }
 
   if (!Object.keys(res).length && !vulnError) {
-    outputChannel.appendLine('[Vuln] none found');
+    outputChannel.appendLine('[Vuln] none found')
   }
-  outputChannel.appendLine('[Vuln] done');
-  return { data: res, error: vulnError };
+  outputChannel.appendLine('[Vuln] done')
+  return { data: res, error: vulnError }
 }
 
 
@@ -884,77 +1001,90 @@ async function checkESLint(ws) {
 
 
 async function checkSonar(ws) {
-  const fn = 'checkSonar';
-  const cfg = vscode.workspace.getConfiguration();
-
-  // VS Code settings → env vars fallback
-  const token      = cfg.get('deptrack.sonar.token')?.trim()      || process.env.SONAR_TOKEN?.trim();
-  const projectKey = cfg.get('deptrack.sonar.projectKey')?.trim() || process.env.SONAR_PROJECT_KEY?.trim();
-  const host       = (cfg.get('deptrack.sonar.hostUrl') ||
-                      process.env.SONAR_HOST_URL ||
-                      'https://sonarcloud.io').replace(/\/$/, '');
-
-  outputChannel.appendLine(`[Sonar] token=${token?.slice(0,4) || '—'}…, projectKey=${projectKey || '—'}`);
-  if (!token || !projectKey) {
-    outputChannel.appendLine(
-      `[Sonar] skipped — set 'deptrack.sonar.token' & 'deptrack.sonar.projectKey' ` +
-      `in settings.json or export SONAR_TOKEN & SONAR_PROJECT_KEY`
-    );
-    outputChannel.appendLine('[Sonar] done');
-    return {};
+  // 1) Run SonarLint
+  const lintBin = resolveCmd(ws, 'sonarlint');
+  const srcDir  = path.join(ws, 'src');
+  if (!lintBin || !fs.existsSync(srcDir)) {
+    outputChannel.appendLine('[SonarLint] skipped — SonarLint or src/ missing');
+    return { passed: true, summary: 'Skipped', metrics: {} };
   }
 
-  const scanner = resolveCmd(ws, 'sonar-scanner');
-  if (!scanner) {
-    outputChannel.appendLine('[Sonar] skipped — sonar-scanner not found');
-    outputChannel.appendLine('[Sonar] done');
-    return {};
-  }
-
-  outputChannel.appendLine('[Sonar] start');
-  let summary = '', metrics = {};
-
-  const props = [
-    `-Dsonar.token=${token}`,
-    `-Dsonar.projectKey=${projectKey}`,
-    `-Dsonar.host.url=${host}`,
-    '-Dsonar.qualitygate.wait=true',
-    '-Dsonar.scm.disabled=true',
-    // Only scan your actual source folder
-    '-Dsonar.sources=src',
-    // Exclude reports, coverage, HTML, fixtures, node_modules, etc.
-    `-Dsonar.exclusions=**/report/**,**/coverage/**,**/*.html,**/fixtures/**,**/.scannerwork/**,**/node_modules/**,**/dist/**,**/.dependency-check/**,**/*.exe`,
-    // Raise CPD threshold so small snippets are skipped
-    '-Dsonar.cpd.javascript.minimumTokens=50',
-    // Use 4 threads in parallel
-    '-Dsonar.threads=4',
-    '-Dsonar.scanner.skipSystemTruststore=true'
-  ];
-  
+  outputChannel.appendLine('[SonarLint] start');
+  let stdout = '';
   try {
-    await execP(`"${scanner}" ${props.join(' ')}`, { cwd: ws, maxBuffer: 209715200 });
-    summary = '✅ Quality Gate passed';
-  } catch (_) {
-    // suppress raw error output, just report gate failure
-    summary = '❌ Quality Gate failed';
+    ({ stdout } = await execP(
+      `"${lintBin}" analyze --src "${srcDir}"`,
+      { cwd: ws, maxBuffer: 200 * 1024 * 1024, env: { ...process.env } }
+    ));
+  } catch (e) {
+    stdout = e.stdout || '';
   }
 
-  // Pull metrics from SonarCloud API
-  try {
-    const metricKeys = ['bugs','vulnerabilities','code_smells','coverage','duplicated_lines_density'].join(',');
-    const url = `${host}/api/measures/component?component=${encodeURIComponent(projectKey)}&metricKeys=${metricKeys}`;
-    const resp = await axios.get(url, { auth: { username: token, password: '' }, timeout: 10000 });
-    metrics = resp.data.component.measures.reduce((acc, m) => {
-      acc[m.metric] = m.value;
-      return acc;
-    }, {});
-  } catch (apiErr) {
-    logError(`${fn} API`, apiErr);
-  }
+  // 2) Parse only the “INFO: […]” lines
+  const issues = stdout
+    .split(/\r?\n/)
+    .filter(l => /^\s*INFO: \[/.test(l))
+    .map(l => {
+      const txt = l.replace(/^\s*INFO:\s*/, '');
+      const m = txt.match(
+        /^\[([^\]]+)\]\s+(.+?):(\d+)(?::\d+)?\s+(\S+)\s*[-–]\s*(.*)$/
+      );
+      return m && { severity: m[1].toUpperCase() };
+    })
+    .filter(Boolean);
 
-  outputChannel.appendLine('[Sonar] done');
-  return { passed: summary.startsWith('✅'), summary, metrics };
+  const counts = issues.reduce((acc, { severity }) => {
+    acc[severity] = (acc[severity] || 0) + 1;
+    return acc;
+  }, {});
+
+  // 3) Run jscpd for duplication
+let dupPct = '—';
+try {
+  const { stdout } = await execP(
+    `npx jscpd --silent --format json src`,
+    { cwd: ws, env: { ...process.env }, maxBuffer: 200 * 1024 * 1024 }
+  );
+
+  // Safely extract only the JSON
+  const firstBrace = stdout.indexOf('{');
+  const lastBrace  = stdout.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace !== -1) {
+    const jsonPart = stdout.slice(firstBrace, lastBrace + 1);
+    const dupReport = JSON.parse(jsonPart);
+    dupPct = dupReport.statistics?.total?.percentage ?? '—';
+  } else {
+    outputChannel.appendLine('[SonarLint] jscpd: no JSON found');
+  }
+} catch (err) {
+  outputChannel.appendLine(`[SonarLint] jscpd failed: ${err.message}`);
 }
+
+  // 4) Determine pass/fail
+  const high = (counts.BLOCKER||0) + (counts.CRITICAL||0) + (counts.MAJOR||0);
+  const passed  = high === 0;
+  const summary = passed
+    ? '✅ No BLOCKER/CRITICAL/MAJOR issues'
+    : `❌ ${high} high-severity issue${high>1?'s':''} found`;
+
+  outputChannel.appendLine(`[SonarLint] total issues: ${issues.length}`);
+  outputChannel.appendLine(`[SonarLint] ${summary}`);
+  outputChannel.appendLine('[SonarLint] done');
+
+  return {
+    passed,
+    summary,
+    metrics: {
+      bugs:                      counts.BLOCKER        || 0,
+      vulnerabilities:           counts.CRITICAL       || 0,
+      code_smells:               counts.MAJOR          || 0,
+      duplicated_lines_density:  dupPct
+    }
+  };
+}
+
+
+
 
 async function checkComplexity(ws) {
   const fn = 'checkComplexity';
@@ -1229,41 +1359,177 @@ async function getSuggestedFixes({
 
 
 
-async function sendEmailNotification(subject, text, overrideTo) {
+
+let webviewPanel; // you’ll need to set this when you create your WebviewPanel
+
+async function sendEmailNotification(subject, text, overrideTo, attachments = []) {
   const cfg = vscode.workspace.getConfiguration('deptrack.email');
-  const transporter = nodemailer.createTransport({
-    service: cfg.get('service') || 'gmail',
-    auth: { user: cfg.get('auth.user'), pass: cfg.get('auth.pass') }
+  const user = cfg.get('auth.user');
+  const pass = cfg.get('auth.pass');
+  const defaultTo = cfg.get('to');
+  const service = cfg.get('service') || 'gmail';
+  const to = overrideTo || defaultTo;
+
+  console.log('[DepTrack] sendEmailNotification config →', {
+    service, user, hasPass: !!pass, to, subject, text, attachments
   });
-  const to = overrideTo || cfg.get('to');
-  if (!cfg.get('auth.user') || !cfg.get('auth.pass') || !to) return;
+
+  if (!user || !pass || !to) {
+    const msg = 'Missing email configuration: auth.user, auth.pass, and to must all be set.';
+    console.error('[DepTrack] ' + msg);
+    webviewPanel?.webview.postMessage({
+      command: 'emailStatus',
+      success: false,
+      error: msg
+    });
+    return;
+  }
+
+  const transporter = nodemailer.createTransport({ service, auth: { user, pass } });
   try {
-    await transporter.sendMail({ from: cfg.get('auth.user'), to, subject, text });
-  } catch (e) {
-    logError('sendEmailNotification', e);
+    const mailOptions = { from: user, to, subject, text };
+    if (attachments.length) mailOptions.attachments = attachments;
+    const info = await transporter.sendMail(mailOptions);
+    console.log('[DepTrack] Email sent:', info.messageId);
+    webviewPanel.webview.postMessage({ command: 'emailStatus', success: true });
+  } catch (err) {
+    console.error('[DepTrack] sendMail error:', err);
+    webviewPanel.webview.postMessage({
+      command: 'emailStatus',
+      success: false,
+      error: err.message
+    });
   }
 }
+
+/**
+ * Helper to run a check with an AbortSignal
+ */
+function withAbort(viewName, checkFn) {
+  const controller = new AbortController();
+  abortControllers[viewName] = controller;
+  return checkFn(controller.signal);
+}
+// Example: hook up your message handler so that `sendEmail` command invokes this
+function registerMessageListener(panel) {
+  webviewPanel = panel;  // capture your WebviewPanel instance
+panel.webview.onDidReceiveMessage(async message => {
+  try {
+    if (message.command === 'sendEmail') {
+      const subject = 'DepTrack Scan Results';
+      const text    = 'Your dependency scan has completed.';
+      await sendEmailNotification(subject, text, message.email);
+    }
+    // …other commands…
+  } catch (err) {
+    console.error('[DepTrack] handler error:', err);
+    panel.webview.postMessage({
+      command: 'emailStatus',
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+}
+
+module.exports = {
+  activate(context) {
+    // ... create your WebviewPanel, then:
+    const panel = vscode.window.createWebviewPanel(/* … */);
+    registerMessageListener(panel);
+    // …
+  }
+};
 
 function exportCsv() {
   if (!latestPayload) return;
   try {
-    const ws = vscode.workspace.workspaceFolders[0].uri.fsPath;
-    let csv = 'Category,Name,Details\n';
-    Object.entries(latestPayload.outdated   || {}).forEach(([p,i]) => { csv += `Outdated,${p},"${i.current}→${i.latest}"\n`; });
-    Object.entries(latestPayload.vuln       || {}).forEach(([p,list]) => list.forEach(v => { csv+=`Vulnerability,${p},"${v.severity}"\n`; }));
-    (latestPayload.licenseIssues            || []).forEach(x => { csv += `License,${x.pkg},"${x.licenses.join(',')}"\n`; });
-    (latestPayload.eslintDetails            || []).forEach(e => { csv += `ESLint,${e.file}:${e.line},"${e.rule}: ${e.message}"\n`; });
-    (latestPayload.duplicationDetails       || []).forEach(d => { csv += `Duplication,${d.fileA}:${d.lineA},${d.fileB}:${d.lineB}\n`; });
-    (latestPayload.complexity               || []).forEach(c => { csv += `Complexity,${c.path},"${c.aggregate.cyclomatic}"\n`; });
-    (latestPayload.secrets                  || []).forEach(s => { csv += `Secret,${s.file}:${s.line},${s.rule}\n`; });
-    Object.entries(latestPayload.depGraph    || {}).forEach(([n,i]) => { csv += `Dependency,${n},"${i.version}"\n`; });
-    (latestPayload.chatHistory              || []).forEach(c => { const t = c.text.replace(/"/g,'""'); csv+=`Chat,${c.from},"${t}"\n`; });
-    (latestPayload.testFiles                || []).forEach(f => { csv += `TestFile,,${f}\n`; });
-    const uri = vscode.Uri.file(path.join(ws,'deptrack-report.csv'));
-    vscode.workspace.fs.writeFile(uri, Buffer.from(csv,'utf8'));
+    const ws  = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    let csv    = 'Category,Name,Details\n';
+
+    // Outdated packages
+    Object.entries(latestPayload.outdated   || {}).forEach(([pkg, info]) => {
+      csv += `Outdated,${pkg},"${info.current}→${info.latest}"\n`;
+    });
+
+    // Vulnerabilities
+    Object.entries(latestPayload.vuln       || {}).forEach(([pkg, list]) =>
+      list.forEach(v => {
+        csv += `Vulnerability,${pkg},"${v.severity}: ${v.title.replace(/"/g,'""')}"\n`;
+      })
+    );
+
+    // License issues
+    (latestPayload.licenseIssues            || []).forEach(x => {
+      csv += `License,${x.pkg},"${x.licenses.join(',')}"\n`;
+    });
+
+    // ESLint warnings/errors
+    (latestPayload.eslintDetails            || []).forEach(e => {
+      csv += `ESLint,${e.file}:${e.line},"${e.rule}: ${e.message.replace(/"/g,'""')}"\n`;
+    });
+
+    // Duplication
+    (latestPayload.duplicationDetails       || []).forEach(d => {
+      csv += `Duplication,${d.fileA}:${d.lineA},${d.fileB}:${d.lineB}\n`;
+    });
+
+    // Complexity metrics
+    (latestPayload.complexity               || []).forEach(c => {
+      csv += `Complexity,${c.path},"Cyclomatic ${c.aggregate.cyclomatic}, SLOC ${c.aggregate.sloc}, Maintainability ${c.aggregate.maintainability}"\n`;
+    });
+
+    // Secrets found
+    (latestPayload.secrets                  || []).forEach(s => {
+      csv += `Secret,${s.file}:${s.line},"${s.rule}: ${s.match.replace(/"/g,'""')}"\n`;
+    });
+
+    // Dependency graph (major versions)
+    Object.entries(latestPayload.depGraph    || {}).forEach(([name, info]) => {
+      csv += `Dependency,${name},"v${info.version}"\n`;
+    });
+
+    // Sonar summary
+    if (latestPayload.sonarResult?.summary) {
+      csv += `Sonar Summary, , "${latestPayload.sonarResult.summary.replace(/"/g,'""')}"\n`;
+    }
+
+    // Sonar metrics
+    const metrics = latestPayload.sonarResult?.metrics || {};
+    Object.entries(metrics).forEach(([key, val]) => {
+      csv += `Sonar Metric,${key},"${val}"\n`;
+    });
+
+    // Suggested fixes
+    (latestPayload.suggestedFixes          || []).forEach(f => {
+      csv += `Suggested Fix,${f.pkg},"${f.fix.replace(/"/g,'""')}"\n`;
+    });
+
+    // Chat history
+    (latestPayload.chatHistory              || []).forEach(c => {
+      const text = c.text.replace(/"/g, '""');
+      csv += `Chat,${c.from},"${text}"\n`;
+    });
+
+    // Any test files (if you populate latestPayload.testFiles)
+    (latestPayload.testFiles                || []).forEach(f => {
+      csv += `Test File, , "${f}"\n`;
+    });
+
+    // Write out
+    const uri = vscode.Uri.file(path.join(ws, 'deptrack-report.csv'));
+    vscode.workspace.fs.writeFile(uri, Buffer.from(csv, 'utf8'));
+    vscode.window.showInformationMessage('DepTrack CSV report written to deptrack-report.csv');
   } catch (e) {
     logError('exportCsv', e);
   }
+}
+
+function withAbort(viewName, checkFn) {
+  const controller = new AbortController();
+  abortControllers[viewName] = controller;
+  return checkFn(controller.signal);
 }
 
 function exportPdf() {
