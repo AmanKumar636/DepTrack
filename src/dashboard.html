@@ -23,7 +23,25 @@
     #viewSelect,#scanView,#scanAll{padding:0.5rem;border-radius:var(--radius);border:none;background:var(--card-bg);color:var(--text-light);cursor:pointer}
     #viewSelect:hover,#scanView:hover,#scanAll:hover{background:rgba(255,255,255,0.1)}
     #viewSelect option{background:var(--card-bg);color:var(--text-light)}
-    section#cards{flex:1;display:flex;flex-wrap:wrap;gap:var(--gap);padding:var(--gap);overflow:auto;background:var(--bg-dark);   grid-auto-rows: 350px;}
+    #chatbotToggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: none;
+  background: none;
+  color: var(--text-light);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+#chatbotToggle:hover,
+#chatbotToggle.active {
+  background: rgba(74,144,226,0.2);
+}
+
+	
+	section#cards{flex:1;display:flex;flex-wrap:wrap;gap:var(--gap);padding:var(--gap);overflow:auto;background:var(--bg-dark);   grid-auto-rows: 350px;}
     .card{background:var(--card-bg);border-radius:var(--radius);box-shadow:0 4px 12px var(--shadow);flex:1 1 calc(33% - var(--gap));min-width:260px;display:flex;flex-direction:column;transition:transform .2s;  height: 50%;}
     .card:hover{transform:translateY(-6px)}
       .card .content {
@@ -77,6 +95,8 @@
 
  <button id="csv">📊 Export CSV<span id="csvSpinner" class="spinner">⏳</span></button>
     <button id="pdf">📕 Export PDF<span id="pdfSpinner" class="spinner">⏳</span></button>
+<button id="chatbotToggle">🤖 Chatbot</button>
+
   </aside>
   <main id="main">
     <header id="header">Welcome</header>
@@ -254,6 +274,15 @@
   });
   document.getElementById('csv').addEventListener('click',()=>{csvSpinner.classList.add('spin');vscode.postMessage({command:'exportCSV'});setTimeout(()=>csvSpinner.classList.remove('spin'),2000);});
     document.getElementById('pdf').addEventListener('click',()=>{pdfSpinner.classList.add('spin');vscode.postMessage({command:'exportPDF'});setTimeout(()=>pdfSpinner.classList.remove('spin'),2000);});
+   // When the new side-panel button is clicked, select "chatbot" and trigger Show
+document.getElementById('chatbotToggle').addEventListener('click', () => {
+  // 1) set the dropdown to the chatbot view
+  document.getElementById('viewSelect').value = 'chatbot';
+  // 2) programmatically click the "Show" button
+  document.getElementById('scanView').click();
+});
+
+   
    document.getElementById('sendInputEmail').addEventListener('click', () => {
   const i = document.getElementById('emailInput');
   if (i.checkValidity()) {
@@ -311,10 +340,15 @@ function capitalize(s) {
     if (e.data.success) console.log('Email sent!');
     else console.error('Email failed:', e.data.error);
   }
+  
   if (m.command === 'updateData' && !healthMode) {
     setLoading(false);
     const d = m.payload;
 
+    if (m.command === 'chatResponse') {
+      const time = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+      appendMessage('bot', m.text, time);
+    }
     const outTb = document.querySelector('#outdatedTable tbody');
     outTb.innerHTML = '';
     Object.entries(d.outdated || {}).forEach(([pkg, info]) => {
