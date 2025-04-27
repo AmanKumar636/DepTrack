@@ -40,7 +40,7 @@ let chatHistory = [];
 let outputChannel;
 let logLines = [];
 const toolExists = {};
-let isScanning = false;
+
 let sessionHistory = [];
 
 let latestPayload = {
@@ -58,23 +58,8 @@ let latestPayload = {
   suggestedFixes: []
 };
 
-
-let latestPayload = {
-  outdated: {},
-  vuln: {},
-  vulnError: null,
-  licenseIssues: [],
-  eslintDetails: [],
-  sonarResult: {},
-  complexity: [],
-  duplicationDetails: [],
-  secrets: [],
-  depGraph: {},
-  chatHistory: [],
-  suggestedFixes: []
-};
-
 function logError(fnName, err) {
+  if (err && err.name === 'AbortError') return;	
   const msg = stripAnsi(err.stack || err.message || err);
   outputChannel && outputChannel.appendLine(`[${fnName}] ERROR: ${msg}`);
 }
@@ -95,203 +80,23 @@ function resolveCmd(ws, tool) {
   return null;
 }
 
-async function scanSecrets(ws) {
-  const fn = 'scanSecrets';
-  outputChannel.appendLine('[Secrets] start');
-  const results = [];
-  const ignored = ['.git', 'node_modules', 'dist', 'report', '.scannerwork'];
-
-  async function walk(dir) {
-    try {
-      const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-      for (const ent of entries) {
-        if (ignored.includes(ent.name)) continue;
-        const full = path.join(dir, ent.name);
-        if (ent.isDirectory()) {
-          await walk(full);
-        } else if (ent.isFile() && /\.(js|ts|py|sh|env|json)$/.test(ent.name)) {
-          let txt;
-          try { txt = await fs.promises.readFile(full, 'utf8'); } catch { continue; }
-          for (const p of patterns) {
-            let m;
-            while ((m = p.regex.exec(txt)) !== null) {
-              results.push({
-                file: path.relative(ws, full),
-                line: txt.slice(0, m.index).split('\n').length,
-                rule: p.name,
-                match: m[0]
-              });
-            }
-          }
-        }
-      }
-    } catch (e) {
-      logError(fn, e);
-    }
-  }
-
-
-  await walk(ws);
-  outputChannel.appendLine(`[Secrets] found ${results.length} items`);
-  outputChannel.appendLine('[Secrets] done');
-  return results;
-}
-
-
-/**
- * Generates a flat dependency graph by reading package-lock.json (or yarn.lock) 
- * and flattening nested dependencies.
- */
-const { parse: parseYarnLock } = require('@yarnpkg/lockfile');
-
-async function checkDepGraph(ws) {
-  const fn       = 'checkDepGraph';
-  outputChannel.appendLine('[DepGraph] start');
-
-  const npmLock  = path.join(ws, 'package-lock.json');
-  const yarnLock = path.join(ws, 'yarn.lock');
-  let graph       = {};
-
-  try {
-    if (fs.existsSync(npmLock)) {
-      const lockRaw  = fs.readFileSync(npmLock, 'utf8');
-      const lockData = JSON.parse(lockRaw);
-
-      if (lockData.packages) {
-        // npm v7+ lockfileVersion 2: flat map under "packages"
-        for (const [pkgPath, info] of Object.entries(lockData.packages)) {
-          if (pkgPath === '') continue;              // skip root
-          const name = info.name
-                     || pkgPath.split('node_modules/').pop();
-          graph[name] = { version: info.version };
-        }
-      }
-      else if (lockData.dependencies) {
-        // classic npm lockfile
-        graph = flattenDeps(lockData);
-      }
-      outputChannel.appendLine(`[DepGraph] npm entries: ${Object.keys(graph).length}`);
-    }
-    else if (fs.existsSync(yarnLock)) {
-      // Yarn v1
-      const raw    = fs.readFileSync(yarnLock, 'utf8');
-      const parsed = parseYarnLock(raw);
-      if (parsed.type === 'success') {
-        for (const key of Object.keys(parsed.object)) {
-          const info = parsed.object[key];
-          const pkg  = key.replace(/@[^@]+$/, '');
-          graph[pkg] = { version: info.version };
-        }
-        outputChannel.appendLine(`[DepGraph] yarn entries: ${Object.keys(graph).length}`);
-      } else {
-        outputChannel.appendLine('[DepGraph] failed — invalid yarn.lock');
-      }
-    }
-    else {
-      outputChannel.appendLine('[DepGraph] skipped — no lockfile found');
-    }
-  } catch (e) {
-    logError(fn, e);
-    outputChannel.appendLine('[DepGraph] failed — could not parse lockfile');
-  }
-
-  outputChannel.appendLine('[DepGraph] done');
-  return graph;
-}
-
-function flattenDeps(tree, acc = {}) {
-  for (const [name, info] of Object.entries(tree.dependencies || {})) {
-    acc[name] = { version: info.version };
-    flattenDeps(info, acc);
-  }
-  return acc;
-}
-
-function deactivate() {
-  clearInterval(refreshInterval);
-}
-
 const abortControllers = {};
 
 async function activate(context) {
+
   // 1) Create and wrap your output channel for logging
   outputChannel = vscode.window.createOutputChannel('DepTrack');
-  const orig = outputChannel.appendLine.bind(outputChannel);
+  const origAppend = outputChannel.appendLine.bind(outputChannel);
   outputChannel.appendLine = line => {
     const entry = `[${new Date().toLocaleTimeString()}] ${stripAnsi(line)}`;
-    orig(entry);
+    origAppend(entry);
     logLines.push(entry);
     panel?.webview.postMessage({ command: 'logUpdate', payload: logLines });
   };
   outputChannel.appendLine('activate start');
 
-  // 2) Allow the user to optionally store an OpenAI key (chat will fall back to HF)
-  context.subscriptions.push(
-<<<<<<< HEAD
-    vscode.commands.registerCommand('Aman.deptrack.setOpenAIKey', async () => {
-      const key = await vscode.window.showInputBox({
-        prompt: 'Enter your OpenAI API key (optional)',
-        ignoreFocusOut: true,
-        password: true
-      });
-      if (key) {
-        await context.secrets.store(OPENAI_SECRET, key);
-        vscode.window.showInformationMessage('✅ OpenAI key saved');
-      } else {
-        vscode.window.showInformationMessage('Chat will use free Hugging Face API');
-=======
-    vscode.commands.registerCommand('Aman.deptrack.openDashboard', () => {
-      outputChannel.appendLine('command openDashboard');
-      if (!panel) {
-        panel = vscode.window.createWebviewPanel(
-          'deptrackDashboard',
-          'DepTrack Dashboard',
-          vscode.ViewColumn.One,
-          { enableScripts: true, localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, 'src'))] }
-        );
-        panel.webview.html = fs.readFileSync(path.join(context.extensionPath, 'src', 'dashboard.html'), 'utf8');
-panel.webview.onDidReceiveMessage(msg => {
-  switch (msg.command) {
-    case 'refreshOutdated':
-      runOutdated();
-      break;
-    case 'refreshVuln':
-      runVuln();
-      break;
-    case 'refreshLicense':
-      runLicenses();
-      break;
-    case 'refreshEslint':
-      runESLint();
-      break;
-    case 'refreshDuplication':
-      runDuplication();
-      break;
-    case 'refreshComplexity':
-      runComplexity();
-      break;
-    case 'refreshSecret':
-      runSecrets();
-      break;
-    case 'refreshDepgraph':
-      runDepGraph();
-      break;
-    case 'refreshFixes':
-      runFixes();
-      break;
-    case 'refreshSonar':
-      runSonar();
-      break;
-  }
-});
 
-        panel.onDidDispose(() => { panel = null; }, null, context.subscriptions);
->>>>>>> 3fe54b9 (Dashboard updated)
-      }
-    })
-  );
-
-  // 3) Open the Dashboard panel
+  // 3) Open the Dashboard panel (creation & message handling)
   context.subscriptions.push(
     vscode.commands.registerCommand('Aman.deptrack.openDashboard', async () => {
       if (panel) {
@@ -308,49 +113,140 @@ panel.webview.onDidReceiveMessage(msg => {
           localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, 'src'))]
         }
       );
+      webviewPanel = panel;
 
       panel.webview.html = fs.readFileSync(
         path.join(context.extensionPath, 'src', 'dashboard.html'),
         'utf8'
       );
 
-      // 4) Handle messages from the webview
-      panel.webview.onDidReceiveMessage(async m => {
-        if (m.command === 'chat') {
-          const userText = m.text?.trim();
-          if (!userText) {
-            panel.webview.postMessage({
-              command: 'chatResponse',
-              text: 'Please enter a message.'
-            });
-            return;
-          }
+      // Debug test message
+      outputChannel.appendLine('⏪ Sending test to webview');
+      panel.webview.postMessage({ command: 'chatResponse', text: '🔥 Test message!' });
 
-          try {
-            // Use free HF API
-            const botText = await getFreeChatResponse(userText);
-            panel.webview.postMessage({
-              command: 'chatResponse',
-              text: botText
-            });
-          } catch (err) {
-            console.error('Chat error:', err);
-            panel.webview.postMessage({
-              command: 'chatResponse',
-              text: '😞 Something went wrong.'
-            });
+      // Handle incoming messages
+      panel.webview.onDidReceiveMessage(async m => {
+        outputChannel.appendLine(`Received command: ${m.command}`);
+        try {
+          switch (m.command) {
+            // Bulk scans
+            case 'refresh':
+            case 'scanAll':
+              return withAbort('all', runAllChecks);
+            case 'scanView':
+              return runView(m.view);
+
+            // Send email notifications
+            case 'sendEmail': {
+              const cfg = vscode.workspace.getConfiguration('deptrack.email');
+              const to = m.email || cfg.get('to');
+              return sendEmailNotification(
+                'DepTrack Scan Results',
+                'Your dependency scan has completed. See your dashboard for details.',
+                to
+              );
+            }
+            case 'sendReportEmail': {
+              const wf = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+              if (!wf) {
+                panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'No workspace open' });
+                break;
+              }
+              const pdfPath = path.join(wf, 'deptrack-report.pdf');
+              if (!fs.existsSync(pdfPath)) {
+                panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'deptrack-report.pdf not found' });
+                break;
+              }
+              const toCfg = vscode.workspace.getConfiguration('deptrack.email').get('to');
+              return sendEmailNotification(
+                'DepTrack PDF Report',
+                'Attached is the latest DepTrack PDF report.',
+                toCfg,
+                [{ filename: 'deptrack-report.pdf', path: pdfPath }]
+              );
+            }
+            case 'sendCsvReportEmail': {
+              const wf = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+              if (!wf) {
+                panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'No workspace open' });
+                break;
+              }
+              const csvPath = path.join(wf, 'deptrack-report.csv');
+              if (!fs.existsSync(csvPath)) {
+                panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'deptrack-report.csv not found' });
+                break;
+              }
+              const toCfg = vscode.workspace.getConfiguration('deptrack.email').get('to');
+              return sendEmailNotification(
+                'DepTrack CSV Report',
+                'Attached is the latest DepTrack CSV report.',
+                toCfg,
+                [{ filename: 'deptrack-report.csv', path: csvPath }]
+              );
+            }
+
+            // Exports & chat
+            case 'exportCSV':
+              return exportCsv();
+            case 'exportPDF':
+              return exportPdf();
+    case 'chat': {
+              const text = m.text?.trim();
+              if (!text) {
+                panel.webview.postMessage({ command: 'chatResponse', text: 'Please enter a message.' });
+                break;
+              }
+              try {
+                const botText = await getFreeChatResponse(text);
+                panel.webview.postMessage({ command: 'chatResponse', text: botText });
+              } catch (err) {
+                console.error('Chat error:', err);
+                panel.webview.postMessage({ command: 'chatResponse', text: '😞 Something went wrong.' });
+              }
+              break;
+            }
+            // Individual refresh
+            case 'refreshOutdated':    return withAbort('outdated', runOutdated);
+            case 'refreshVuln':        return withAbort('vuln', runVuln);
+            case 'refreshLicense':     return withAbort('license', runLicenses);
+            case 'refreshEslint':      return withAbort('eslint', runESLint);
+            case 'refreshDuplication': return withAbort('duplication', runDuplication);
+            case 'refreshComplexity':  return withAbort('complexity', runComplexity);
+            case 'refreshSecret':      return withAbort('secret', runSecrets);
+            case 'refreshDepgraph':    return withAbort('depgraph', runDepGraph);
+            case 'refreshFixes':       return withAbort('fixes', runFixes);
+            case 'refreshSonar':       return withAbort('sonar', runSonar);
+
+            // Cancellation
+            case 'cancelAll':        abortControllers.all?.abort();    break;
+            case 'cancelOutdated':   abortControllers.outdated?.abort();break;
+            case 'cancelVuln':       abortControllers.vuln?.abort();   break;
+            case 'cancelLicense':    abortControllers.license?.abort();break;
+            case 'cancelEslint':     abortControllers.eslint?.abort(); break;
+            case 'cancelDuplication':abortControllers.duplication?.abort(); break;
+            case 'cancelComplexity': abortControllers.complexity?.abort();break;
+            case 'cancelSecret':     abortControllers.secret?.abort(); break;
+            case 'cancelDepgraph':   abortControllers.depgraph?.abort();break;
+            case 'cancelFixes':      abortControllers.fixes?.abort();  break;
+            case 'cancelSonar':      abortControllers.sonar?.abort();  break;
+
+            default:
+              outputChannel.appendLine(`Unknown command: ${m.command}`);
           }
+        } catch (err) {
+          console.error('[DepTrack] handler error:', err);
+          panel.webview.postMessage({ command: 'emailStatus', success: false, error: err.message });
         }
       });
 
       panel.onDidDispose(() => {
         panel = null;
+        webviewPanel = null;
       }, null, context.subscriptions);
     })
   );
 
-<<<<<<< HEAD
-  // 5) Register other commands (unchanged)
+  // 4) Register other top-level commands
   context.subscriptions.push(
     vscode.commands.registerCommand('Aman.deptrack.refresh', () =>
       withAbort('all', runAllChecks)
@@ -365,25 +261,17 @@ panel.webview.onDidReceiveMessage(msg => {
         panel.webview.postMessage({ command: 'sendCsvReportEmail' })
       )
     )
-=======
-  // Other commands (sendEmail, exportCSV, exportPDF, chat)
-  context.subscriptions.push(
-
-    vscode.commands.registerCommand('Aman.deptrack.sendEmail', args => sendEmailNotification('DepTrack Alert', 'See report.', args)),
-    vscode.commands.registerCommand('Aman.deptrack.exportCSV', exportCsv),
-    vscode.commands.registerCommand('Aman.deptrack.exportPDF', exportPdf),
-    vscode.commands.registerCommand('Aman.deptrack.chat', args => handleChat(args))
->>>>>>> 3fe54b9 (Dashboard updated)
   );
 
-  // 6) Finally, launch the dashboard and log completion
+  // 5) Launch the dashboard on startup
   vscode.commands
     .executeCommand('Aman.deptrack.openDashboard')
     .then(() => outputChannel.appendLine('activate done'))
     .catch(err => outputChannel.appendLine('activate error: ' + err.message));
 }
 
-<<<<<<< HEAD
+exports.activate = activate;
+
 
 function deactivate() {
   panel = null;
@@ -392,6 +280,7 @@ function deactivate() {
 
 
 async function getFreeChatResponse(prompt) {
+  console.log('🕵️ Sending to HF API:', prompt);
   const res = await fetch(HF_URL, {
     method:  'POST',
     headers: {
@@ -400,36 +289,20 @@ async function getFreeChatResponse(prompt) {
     },
     body: JSON.stringify({ inputs: prompt }),
   });
-  if (!res.ok) {
-    throw new Error(`HF API error: ${res.statusText}`);
-=======
-async function onWebviewMessage(msg) {
-  outputChannel.appendLine(`onWebviewMessage ${msg.command}`);
-  switch (msg.command) {
-    case 'refresh': return runAllChecks();
-    case 'scanView': return runAllChecks();
-    case 'scanAll': return runAllChecks();
-    case 'sendEmail': return sendEmailNotification('DepTrack Alert', 'See report.', msg.email);
-    case 'exportCSV': return exportCsv();
-    case 'exportPDF': return exportPdf();
-    case 'chat': return handleChat(msg.text);
-    default: outputChannel.appendLine(`[onWebviewMessage] unknown: ${msg.command}`);
->>>>>>> 3fe54b9 (Dashboard updated)
-  }
+  if (!res.ok) throw new Error(`Service error: ${res.statusText}`);
   const json = await res.json();
-  // DialoGPT returns an array of possible generations; pick the first:
   return Array.isArray(json) && json[0]?.generated_text
-       ? json[0].generated_text
-       : 'Sorry, I didn’t get that.';
+    ? json[0].generated_text
+    : 'Sorry, I didn\'t get that.';
 }
-async function runAllChecks() {
-  if (isScanning) return;
-  isScanning = true;
 
+
+async function runAllChecks() {
+  
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) {
     vscode.window.showErrorMessage('Open a workspace first');
-    isScanning = false;
+    
     return;
   }
 
@@ -533,220 +406,336 @@ async function runAllChecks() {
   });
 
   outputChannel.appendLine('runAllChecks done');
-  isScanning = false;
+ 
 }
 
 
 
-async function runOutdated() {
-  if (isScanning) return;
-  isScanning = true;
+async function runOutdated(signal) {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) {
     vscode.window.showErrorMessage('Open a workspace first');
-    isScanning = false;
     return;
   }
   outputChannel.show(true);
+  if (signal.aborted) {
+    outputChannel.appendLine('runOutdated: aborted before start');
+    return;
+  }
   outputChannel.appendLine('runOutdated start');
   try {
-    const outdated = await checkOutdated(ws);
+    const outdated = await checkOutdated(ws, signal);
+    if (signal.aborted) {
+      outputChannel.appendLine('runOutdated: aborted before UI update');
+      return;
+    }
     latestPayload.outdated = outdated;
     panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
   } catch (e) {
     logError('runOutdated', e);
+		 if (e.name === 'AbortError') {
+      outputChannel.appendLine('runOutdated: aborted');
+    } else {
+      logError('runOutdated', e);
+    }
+
+	
+	
+	
   }
   outputChannel.appendLine('runOutdated done');
-  isScanning = false;
 }
 
-async function runVuln() {
-  if (isScanning) return;
-  isScanning = true;
+async function runVuln(signal) {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) {
     vscode.window.showErrorMessage('Open a workspace first');
-    isScanning = false;
     return;
   }
   outputChannel.show(true);
+  if (signal.aborted) {
+    outputChannel.appendLine('runVuln: aborted before start');
+    return;
+  }
   outputChannel.appendLine('runVuln start');
   try {
-    const vulnPayload = await checkVuln(ws);
+    const vulnPayload = await checkVuln(ws, signal);
+    if (signal.aborted) {
+      outputChannel.appendLine('runVuln: aborted before UI update');
+      return;
+    }
     latestPayload.vuln = vulnPayload.data;
     latestPayload.vulnError = vulnPayload.error;
     panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
   } catch (e) {
     logError('runVuln', e);
+  	 if (e.name === 'AbortError') {
+      outputChannel.appendLine('runVuln: aborted');
+    } else {
+      logError('runVuln', e);
+    }
+
+  
   }
   outputChannel.appendLine('runVuln done');
-  isScanning = false;
 }
 
-async function runLicenses() {
-  if (isScanning) return;
-  isScanning = true;
+
+async function runLicenses(signal) {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) {
     vscode.window.showErrorMessage('Open a workspace first');
-    isScanning = false;
     return;
   }
   outputChannel.show(true);
+  if (signal.aborted) {
+    outputChannel.appendLine('runLicenses: aborted before start');
+    return;
+  }
   outputChannel.appendLine('runLicenses start');
   try {
-    const licenseIssues = await checkLicenses(ws);
+    const licenseIssues = await checkLicenses(ws, signal);
+    if (signal.aborted) {
+      outputChannel.appendLine('runLicenses: aborted before UI update');
+      return;
+    }
     latestPayload.licenseIssues = licenseIssues;
     panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
   } catch (e) {
     logError('runLicenses', e);
+	 if (e.name === 'AbortError') {
+      outputChannel.appendLine('runLicenses: aborted');
+    } else {
+      logError('runLicenses', e);
+    }
+	
+	
   }
   outputChannel.appendLine('runLicenses done');
-  isScanning = false;
 }
 
-async function runESLint() {
-  if (isScanning) return;
-  isScanning = true;
+
+
+async function runESLint(signal) {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) {
     vscode.window.showErrorMessage('Open a workspace first');
-    isScanning = false;
     return;
   }
   outputChannel.show(true);
+  if (signal.aborted) {
+    outputChannel.appendLine('runESLint: aborted before start');
+    return;
+  }
   outputChannel.appendLine('runESLint start');
   try {
-    const eslintDetails = await checkESLint(ws);
+    const eslintDetails = await checkESLint(ws, signal);
+    if (signal.aborted) {
+      outputChannel.appendLine('runESLint: aborted before UI update');
+      return;
+    }
     latestPayload.eslintDetails = eslintDetails;
     panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
   } catch (e) {
     logError('runESLint', e);
+	 if (e.name === 'AbortError') {
+      outputChannel.appendLine('runESLint: aborted');
+    } else {
+      logError('runESLint', e);
+    }
+
+
+
   }
   outputChannel.appendLine('runESLint done');
-  isScanning = false;
 }
 
-async function runSonar() {
-  if (isScanning) return;
-  isScanning = true;
+
+
+
+async function runSonar(signal) {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) {
     vscode.window.showErrorMessage('Open a workspace first');
-    isScanning = false;
     return;
   }
   outputChannel.show(true);
+  if (signal.aborted) {
+    outputChannel.appendLine('runSonar: aborted before start');
+    return;
+  }
   outputChannel.appendLine('runSonar start');
   try {
-    const sonarResult = await checkSonar(ws);
+    const sonarResult = await checkSonar(ws, signal);
+    if (signal.aborted) {
+      outputChannel.appendLine('runSonar: aborted before UI update');
+      return;
+    }
     latestPayload.sonarResult = sonarResult;
     panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
   } catch (e) {
     logError('runSonar', e);
+	 if (e.name === 'AbortError') {
+      outputChannel.appendLine('runSonar: aborted');
+    } else {
+      logError('runSonar', e);
+    }
+
+
   }
   outputChannel.appendLine('runSonar done');
-  isScanning = false;
 }
 
-async function runComplexity() {
-  if (isScanning) return;
-  isScanning = true;
+
+
+
+async function runComplexity(signal) {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) {
     vscode.window.showErrorMessage('Open a workspace first');
-    isScanning = false;
     return;
   }
   outputChannel.show(true);
+  if (signal.aborted) {
+    outputChannel.appendLine('runComplexity: aborted before start');
+    return;
+  }
   outputChannel.appendLine('runComplexity start');
   try {
-    const complexity = await checkComplexity(ws);
+    const complexity = await checkComplexity(ws, signal);
+    if (signal.aborted) {
+      outputChannel.appendLine('runComplexity: aborted before UI update');
+      return;
+    }
     latestPayload.complexity = complexity;
     panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
   } catch (e) {
     logError('runComplexity', e);
+
+	 if (e.name === 'AbortError') {
+      outputChannel.appendLine('runComplexity: aborted');
+    } else {
+      logError('runComplexity', e);
+    }
+
+
+
   }
   outputChannel.appendLine('runComplexity done');
-  isScanning = false;
 }
 
-async function runDuplication() {
-  if (isScanning) return;
-  isScanning = true;
+async function runDuplication(signal) {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) {
     vscode.window.showErrorMessage('Open a workspace first');
-    isScanning = false;
     return;
   }
   outputChannel.show(true);
+  if (signal.aborted) {
+    outputChannel.appendLine('runDuplication: aborted before start');
+    return;
+  }
   outputChannel.appendLine('runDuplication start');
   try {
-    const duplicationDetails = await checkDuplication(ws);
+    const duplicationDetails = await checkDuplication(ws, signal);
+    if (signal.aborted) {
+      outputChannel.appendLine('runDuplication: aborted before UI update');
+      return;
+    }
     latestPayload.duplicationDetails = duplicationDetails;
     panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
   } catch (e) {
     logError('runDuplication', e);
+  	 if (e.name === 'AbortError') {
+      outputChannel.appendLine('runDuplication: aborted');
+    } else {
+      logError('runDuplication', e);
+    }
+
+  
+  
   }
   outputChannel.appendLine('runDuplication done');
-  isScanning = false;
 }
 
-async function runSecrets() {
-  if (isScanning) return;
-  isScanning = true;
+async function runSecrets(signal) {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) {
     vscode.window.showErrorMessage('Open a workspace first');
-    isScanning = false;
     return;
   }
   outputChannel.show(true);
+  if (signal.aborted) {
+    outputChannel.appendLine('runSecrets: aborted before start');
+    return;
+  }
   outputChannel.appendLine('runSecrets start');
   try {
-    const secrets = await scanSecrets(ws);
+    const secrets = await scanSecrets(ws, signal);
+    if (signal.aborted) {
+      outputChannel.appendLine('runSecrets: aborted before UI update');
+      return;
+    }
     latestPayload.secrets = secrets;
     panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
   } catch (e) {
     logError('runSecrets', e);
+  	 if (e.name === 'AbortError') {
+      outputChannel.appendLine('runSecrets: aborted');
+    } else {
+      logError('runSecrets', e);
+    }
+
   }
   outputChannel.appendLine('runSecrets done');
-  isScanning = false;
 }
 
-async function runDepGraph() {
-  if (isScanning) return;
-  isScanning = true;
+async function runDepGraph(signal) {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) {
     vscode.window.showErrorMessage('Open a workspace first');
-    isScanning = false;
     return;
   }
   outputChannel.show(true);
+  if (signal.aborted) {
+    outputChannel.appendLine('runDepGraph: aborted before start');
+    return;
+  }
   outputChannel.appendLine('runDepGraph start');
   try {
-    const depGraph = await checkDepGraph(ws);
+    const depGraph = await checkDepGraph(ws, signal);
+    if (signal.aborted) {
+      outputChannel.appendLine('runDepGraph: aborted before UI update');
+      return;
+    }
     latestPayload.depGraph = depGraph;
     panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
   } catch (e) {
     logError('runDepGraph', e);
+  
+  	 if (e.name === 'AbortError') {
+      outputChannel.appendLine('runDepGraph: aborted');
+    } else {
+      logError('runDepGraph', e);
+    }
+
+  
+  
   }
   outputChannel.appendLine('runDepGraph done');
-  isScanning = false;
 }
 
-async function runFixes() {
-  if (isScanning) return;
-  isScanning = true;
+async function runFixes(signal) {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) {
     vscode.window.showErrorMessage('Open a workspace first');
-    isScanning = false;
     return;
   }
   outputChannel.show(true);
+  if (signal.aborted) {
+    outputChannel.appendLine('runFixes: aborted before start');
+    return;
+  }
   outputChannel.appendLine('runFixes start');
   try {
     const fixes = await getSuggestedFixes({
@@ -757,39 +746,173 @@ async function runFixes() {
       duplicationDetails: latestPayload.duplicationDetails,
       secrets: latestPayload.secrets
     });
+    if (signal.aborted) {
+      outputChannel.appendLine('runFixes: aborted before UI update');
+      return;
+    }
     latestPayload.suggestedFixes = fixes;
     panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
   } catch (e) {
     logError('runFixes', e);
+	
+		 if (e.name === 'AbortError') {
+      outputChannel.appendLine('runFixes: aborted');
+    } else {
+      logError('runFixes', e);
+    }
+
   }
   outputChannel.appendLine('runFixes done');
-  isScanning = false;
 }
 
 
-// Updated checkOutdated: treats npm outdated exit-code 1 as normal, cleans up logging
-async function checkOutdated(ws) {
+
+
+
+
+// Helper functions with AbortSignal support
+
+async function scanSecrets(ws, signal) {
+  const fn = 'scanSecrets';
+  if (signal.aborted) return [];
+  outputChannel.appendLine('[Secrets] start');
+  const results = [];
+  const ignored = ['.git', 'node_modules', 'dist', 'report', '.scannerwork'];
+
+  async function walk(dir) {
+    if (signal.aborted) return;
+    try {
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+      for (const ent of entries) {
+        if (signal.aborted) return;
+        if (ignored.includes(ent.name)) continue;
+        const full = path.join(dir, ent.name);
+        if (ent.isDirectory()) {
+          await walk(full);
+        } else if (ent.isFile() && /\.(js|ts|py|sh|env|json)$/.test(ent.name)) {
+          let txt;
+          try { txt = await fs.promises.readFile(full, 'utf8'); } catch { continue; }
+          for (const p of patterns) {
+            if (signal.aborted) return;
+            let m;
+            while (!signal.aborted && (m = p.regex.exec(txt)) !== null) {
+              results.push({
+                file: path.relative(ws, full),
+                line: txt.slice(0, m.index).split('\n').length,
+                rule: p.name,
+                match: m[0]
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      logError(fn, e);
+    }
+  }
+
+  await walk(ws);
+  if (!signal.aborted) {
+    outputChannel.appendLine(`[Secrets] found ${results.length} items`);
+    outputChannel.appendLine('[Secrets] done');
+  }
+  return results;
+}
+
+async function checkDepGraph(ws, signal) {
+  const fn = 'checkDepGraph';
+  if (signal.aborted) return {};
+  outputChannel.appendLine('[DepGraph] start');
+
+  const npmLock  = path.join(ws, 'package-lock.json');
+  const yarnLock = path.join(ws, 'yarn.lock');
+  let graph = {};
+
+  try {
+    if (signal.aborted) return graph;
+    if (fs.existsSync(npmLock)) {
+      const lockRaw  = fs.readFileSync(npmLock, 'utf8');
+      const lockData = JSON.parse(lockRaw);
+      if (lockData.packages) {
+        for (const [pkgPath, info] of Object.entries(lockData.packages)) {
+          if (signal.aborted) break;
+          if (pkgPath === '') continue;
+          const name = info.name || pkgPath.split('node_modules/').pop();
+          graph[name] = { version: info.version };
+        }
+      } else if (lockData.dependencies) {
+        graph = flattenDeps(lockData);
+      }
+      if (!signal.aborted) outputChannel.appendLine(`[DepGraph] npm entries: ${Object.keys(graph).length}`);
+    } else if (fs.existsSync(yarnLock)) {
+      const raw    = fs.readFileSync(yarnLock, 'utf8');
+      const parsed = parseYarnLock(raw);
+      if (parsed.type === 'success') {
+        for (const key of Object.keys(parsed.object)) {
+          if (signal.aborted) break;
+          const info = parsed.object[key];
+          const pkg  = key.replace(/@[^@]+$/, '');
+          graph[pkg] = { version: info.version };
+        }
+        if (!signal.aborted) outputChannel.appendLine(`[DepGraph] yarn entries: ${Object.keys(graph).length}`);
+      } else {
+        outputChannel.appendLine('[DepGraph] failed — invalid yarn.lock');
+      }
+    } else {
+      outputChannel.appendLine('[DepGraph] skipped — no lockfile found');
+    }
+  } catch (e) {
+    logError(fn, e);
+    outputChannel.appendLine('[DepGraph] failed — could not parse lockfile');
+  }
+
+  if (!signal.aborted) outputChannel.appendLine('[DepGraph] done');
+  return graph;
+}
+
+
+
+function flattenDeps(tree, acc = {}) {
+  for (const [name, info] of Object.entries(tree.dependencies || {})) {
+    acc[name] = { version: info.version };
+    flattenDeps(info, acc);
+  }
+  return acc;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+async function checkOutdated(ws, signal) {
   const fn = 'checkOutdated';
   const npm = resolveCmd(ws, 'npm');
   const res = {};
   const pkgJson = path.join(ws, 'package.json');
-
-  if (!npm) {
-    outputChannel.appendLine('[Outdated] skipped — npm not found');
-    return res;
-  }
-  if (!fs.existsSync(pkgJson)) {
-    outputChannel.appendLine('[Outdated] skipped — no package.json');
-    return res;
-  }
+  if (!npm || !fs.existsSync(pkgJson) || signal.aborted) return res;
 
   outputChannel.appendLine('[Outdated] start');
   let raw = '';
   try {
-    const { stdout } = await execP(`"${npm}" outdated --json`, { cwd: ws, maxBuffer: 52428800 });
+    const { stdout } = await execP(
+      `"${npm}" outdated --json`,
+      { cwd: ws, signal, maxBuffer: 52428800 }
+    );
     raw = stdout.trim();
   } catch (e) {
-    // exit code >0 may simply indicate outdated packages
+    if (signal.aborted) {
+      outputChannel.appendLine('[Outdated] aborted during exec');
+      return res;
+    }
     raw = (e.stdout || '').trim();
     if (!raw) {
       logError(fn, e);
@@ -810,240 +933,150 @@ async function checkOutdated(ws) {
 
   for (const [pkg, info] of Object.entries(data)) {
     const diff = semver.diff(info.current, info.latest);
-    res[pkg] = {
-      current: info.current,
-      latest:  info.latest,
-      status:  diff === 'major' ? 'critical' : diff === 'minor' ? 'warning' : 'good'
-    };
+    res[pkg] = { current: info.current, latest: info.latest,
+      status: diff === 'major' ? 'critical' : diff === 'minor' ? 'warning' : 'good' };
   }
 
   const count = Object.keys(res).length;
-  if (!count) {
-    outputChannel.appendLine('[Outdated] none found');
-  } else {
-    outputChannel.appendLine(`[Outdated] found ${count} outdated package${count > 1 ? 's' : ''}`);
-  }
+  outputChannel.appendLine(count
+    ? `[Outdated] found ${count} outdated package${count>1?'s':''}`
+    : '[Outdated] none found'
+  );
   outputChannel.appendLine('[Outdated] done');
   return res;
 }
 
+async function checkVuln(ws, signal) {
+  const fn = 'checkVuln';
+  const snyk = resolveCmd(ws, 'snyk');
+  const npm  = resolveCmd(ws, 'npm');
+  const res  = {};
+  let vulnError = null;
+  const pkgJson = path.join(ws, 'package.json');
+  if (!fs.existsSync(pkgJson) || signal.aborted) return { data: res, error: null };
 
-// Updated checkVuln: treats Snyk exit-code 1 as normal, silences raw snippet logs
+  const execOpts = { cwd: ws, signal, maxBuffer: 52428800, env: { ...process.env } };
+  outputChannel.appendLine('[Vuln] start');
+  let payload = null;
 
-async function checkVuln(ws) {
-  const fn = 'checkVuln'
-  const snyk = resolveCmd(ws, 'snyk')
-  const npm  = resolveCmd(ws, 'npm')
-  const res  = {}
-  let vulnError = null
-  const pkgJson = path.join(ws, 'package.json')
-
-  if (!fs.existsSync(pkgJson)) {
-    outputChannel.appendLine('[Vuln] skipped — no package.json')
-    return { data: res, error: null }
-  }
-
-  // pull the token from process.env (dotenv has already loaded it)
-  const token = process.env.SNYK_TOKEN
-  if (!token) {
-    outputChannel.appendLine('[Vuln] warning — SNYK_TOKEN not set in environment')
-  }
-
-  // common exec options, injecting our full process.env (which includes SNYK_TOKEN)
-  const execOpts = {
-    cwd: ws,
-    maxBuffer: 52428800,
-    env: { ...process.env }
-  }
-
-  outputChannel.appendLine('[Vuln] start')
-  let payload = null
-
-  if (snyk) {
+  if (snyk && !signal.aborted) {
     try {
-      // The Snyk CLI will automatically read SNYK_TOKEN from the environment
-      const { stdout } = await execP(`"${snyk}" test --json`, execOpts)
-      payload = JSON.parse(stdout)
+      const { stdout } = await execP(`"${snyk}" test --json`, execOpts);
+      payload = JSON.parse(stdout);
     } catch (e) {
-      const raw = e.stdout || ''
-      if (raw) {
-        try {
-          payload = JSON.parse(raw)
-        } catch (pe) {
-          vulnError = `Snyk JSON parse failed: ${pe.message}`
-        }
+      if (signal.aborted) {
+        outputChannel.appendLine('[Vuln] aborted during Snyk');
       } else {
-        vulnError = `Snyk failed: ${stripAnsi(e.stderr || e.message)}`
+        const raw = e.stdout || '';
+        try { payload = raw && JSON.parse(raw); }
+        catch (pe) { vulnError = raw ? `JSON parse failed: ${pe.message}` : `Snyk failed: ${stripAnsi(e.stderr||e.message)}`; }
       }
     }
   }
 
-  if (!payload && npm) {
+  if (!payload && npm && !signal.aborted) {
     try {
-      const { stdout } = await execP(`"${npm}" audit --json`, execOpts)
-      payload = JSON.parse(stdout)
+      const { stdout } = await execP(`"${npm}" audit --json`, execOpts);
+      payload = JSON.parse(stdout);
     } catch (e) {
-      const raw = e.stdout || ''
-      if (raw) {
-        try {
-          payload = JSON.parse(raw)
-        } catch (pe) {
-          vulnError = `npm audit JSON parse failed: ${pe.message}`
-        }
+      if (signal.aborted) {
+        outputChannel.appendLine('[Vuln] aborted during npm audit');
       } else {
-        vulnError = `npm audit failed: ${stripAnsi(e.stderr || e.message)}`
+        const raw = e.stdout || '';
+        try { payload = raw && JSON.parse(raw); }
+        catch (pe) { vulnError = raw ? `JSON parse failed: ${pe.message}` : `npm audit failed: ${stripAnsi(e.stderr||e.message)}`; }
       }
     }
   }
 
   if (payload && typeof payload === 'object') {
-    const list = Array.isArray(payload.vulnerabilities)
-               ? payload.vulnerabilities
-               : Object.values(payload.vulnerabilities || {})
-    outputChannel.appendLine(`[Vuln] total vulnerabilities: ${list.length}`)
+    const list = Array.isArray(payload.vulnerabilities) ? payload.vulnerabilities : Object.values(payload.vulnerabilities||{});
+    outputChannel.appendLine(`[Vuln] total vulnerabilities: ${list.length}`);
     for (const v of list) {
-      const pkgName = v.packageName || v.name || v.module_name
-      const severity = (v.severity || v.cvssScore || 'unknown').toString().toLowerCase()
-      const title    = v.title || v.overview || ''
-      ;(res[pkgName] ||= []).push({ severity, title })
+      if (signal.aborted) break;
+      const pkgName = v.packageName||v.name||v.module_name;
+      const severity= (v.severity||v.cvssScore||'unknown').toString().toLowerCase();
+      const title   = v.title||v.overview||'';
+      (res[pkgName] ||=[]).push({ severity, title });
     }
   } else if (vulnError) {
-    outputChannel.appendLine(`[Vuln] error: ${vulnError}`)
+    outputChannel.appendLine(`[Vuln] error: ${vulnError}]`);
   }
 
-  if (!Object.keys(res).length && !vulnError) {
-    outputChannel.appendLine('[Vuln] none found')
-  }
-  outputChannel.appendLine('[Vuln] done')
-  return { data: res, error: vulnError }
+  if (!signal.aborted) outputChannel.appendLine('[Vuln] done');
+  return { data: res, error: vulnError };
 }
 
-
-async function checkLicenses(ws) {
+async function checkLicenses(ws, signal) {
   const fn = 'checkLicenses';
+  if (signal.aborted) return [];
   outputChannel.appendLine('[License] start');
   const tool = resolveCmd(ws, 'license-checker');
   if (!tool) { outputChannel.appendLine('[License] skipped'); outputChannel.appendLine('[License] done'); return []; }
   let res = [];
   try {
+    if (signal.aborted) return [];
     outputChannel.appendLine('[License] running');
-    const { stdout } = await execP(`"${tool}" --json`, { cwd: ws });
+    const { stdout } = await execP(`"${tool}" --json`, { cwd: ws, signal });
     const data = JSON.parse(stdout);
     for (const [pkg, info] of Object.entries(data)) {
-      const ls = info.licenses ? (Array.isArray(info.licenses) ? info.licenses : [info.licenses]) : ['UNKNOWN'];
-      const bad = ls.filter(l => forbiddenLicenses.some(f => l.toUpperCase().includes(f)));
+      if (signal.aborted) break;
+      const ls  = info.licenses? (Array.isArray(info.licenses)? info.licenses:[info.licenses]): ['UNKNOWN'];
+      const bad = ls.filter(l=> forbiddenLicenses.some(f=>l.toUpperCase().includes(f)));
       if (bad.length) res.push({ pkg, licenses: bad });
     }
-  } catch (e) {
-    logError(fn, e);
-  }
-  if (!res.length) outputChannel.appendLine('[License] none');
-  outputChannel.appendLine('[License] done');
+  } catch (e) { logError(fn, e); }
+  if (!signal.aborted) outputChannel.appendLine('[License] done');
   return res;
 }
 
-// ─── checkESLint (shell-out to ESLint CLI) ───────────────────────────────────
-async function checkESLint(ws) {
+async function checkESLint(ws, signal) {
   const fn = 'checkESLint';
+  if (signal.aborted) return [];
   outputChannel.appendLine('[ESLint] start');
 
-  // 1) Glob patterns and ignore folders
   const patterns = ['**/*.{js,jsx,ts,tsx}'];
-  const ignore   = ['node_modules/**', 'dist/**', 'report/**', 'coverage/**', 'deptrack/**', 'media/**', 'cleaned/**'];
-  outputChannel.appendLine(`[ESLint] glob patterns: ${patterns}`);
-  outputChannel.appendLine(`[ESLint] ignores: ${ignore}`);
-
+  const ignore   = ['node_modules/**','dist/**','report/**','coverage/**','deptrack/**','media/**','cleaned/**'];
   let files;
+  try { files = await fg(patterns,{cwd:ws,onlyFiles:true,absolute:true,ignore}); }
+  catch(e){ logError(fn,e); outputChannel.appendLine('[ESLint] done'); return []; }
+  if (!files.length || signal.aborted) { outputChannel.appendLine('[ESLint] done'); return []; }
+  for (const f of files) { if (signal.aborted) break; outputChannel.appendLine(`[ESLint] will lint: ${path.relative(ws,f)}`); }
+
+  const binName  = process.platform==='win32'?'eslint.cmd':'eslint';
+  const localBin = path.join(ws,'node_modules','.bin',binName);
+  const eslintBin= fs.existsSync(localBin)?`"${localBin}"`:'eslint';
+  const configF  = path.join(ws,'eslint.config.cjs');
+  const args     = [`-c "${configF}"`,'-f json',...files.map(f=>`"${f}"`)].join(' ');
+  const cmd      = `${eslintBin} ${args}`;
+
+  let raw='';
   try {
-    files = await fg(patterns, { cwd: ws, onlyFiles: true, absolute: true, ignore });
-  } catch (e) {
-    logError(fn, e);
-    outputChannel.appendLine('[ESLint] error resolving files');
-    outputChannel.appendLine('[ESLint] done');
-    return [];
-  }
+    const out = await execP(cmd,{cwd:ws,signal,maxBuffer:20*1024*1024});
+    raw = (out.stdout||'').trim()||(out.stderr||'').trim();
+  } catch(e){ if (!signal.aborted) raw=(e.stdout||'').trim()||(e.stderr||'').trim(); }
+  if (!raw || signal.aborted) { outputChannel.appendLine('[ESLint] done'); return []; }
 
-  if (!files.length) {
-    outputChannel.appendLine('[ESLint] no files to scan');
-    outputChannel.appendLine('[ESLint] done');
-    return [];
-  }
-  files.forEach(f => outputChannel.appendLine(`[ESLint] will lint: ${path.relative(ws, f)}`));
-
-  // 2) Locate ESLint binary
-  const binName   = process.platform === 'win32' ? 'eslint.cmd' : 'eslint';
-  const localBin  = path.join(ws, 'node_modules', '.bin', binName);
-  const eslintBin = fs.existsSync(localBin) ? `"${localBin}"` : 'eslint';
-  outputChannel.appendLine(`[ESLint] using binary: ${eslintBin}`);
-
-  // 3) Build and run CLI command pointing at our CJS config
-  const configFile = path.join(ws, 'eslint.config.cjs');
-  const args = [
-    `-c "${configFile}"`,   // CommonJS config
-    '-f json',
-    ...files.map(f => `"${f}"`)
-  ].join(' ');
-  const cmd = `${eslintBin} ${args}`;
-  outputChannel.appendLine(`[ESLint] running: ${cmd}`);
-
-  let raw = '';
-  try {
-    const { stdout, stderr } = await execP(cmd, { cwd: ws, maxBuffer: 20 * 1024 * 1024 });
-    raw = (stdout || '').trim() || (stderr || '').trim();
-  } catch (e) {
-    raw = (e.stdout || '').trim() || (e.stderr || '').trim();
-  }
-
-  if (!raw) {
-    outputChannel.appendLine('[ESLint] no output received');
-    outputChannel.appendLine('[ESLint] done');
-    return [];
-  }
-
-  // 4) Extract JSON and parse
-  const first = raw.indexOf('[');
-  const last  = raw.lastIndexOf(']');
-  const jsonText = first >= 0 && last > first ? raw.slice(first, last + 1) : '';
-  if (!jsonText) {
-    outputChannel.appendLine('[ESLint] no valid JSON block found');
-    outputChannel.appendLine('[ESLint] done');
-    return [];
-  }
-
+  const first = raw.indexOf('['); const last = raw.lastIndexOf(']');
+  const jsonText = (first>=0&&last>first)?raw.slice(first,last+1):'';
   let results;
-  try {
-    results = JSON.parse(jsonText);
-  } catch (pe) {
-    logError(fn, pe);
-    outputChannel.appendLine('[ESLint] JSON parse failed');
-    outputChannel.appendLine('[ESLint] done');
-    return [];
-  }
+  try { results = JSON.parse(jsonText); } catch(pe){ logError(fn,pe); outputChannel.appendLine('[ESLint] done'); return []; }
 
-  // 5) Flatten results for the dashboard
   const res = [];
   for (const fileResult of results) {
-    const rel = path.relative(ws, fileResult.filePath);
+    if (signal.aborted) break;
+    const rel = path.relative(ws,fileResult.filePath);
     if (/^(node_modules|dist|report|coverage|deptrack)[\/\\]/.test(rel)) continue;
-    outputChannel.appendLine(`[ESLint] checked: ${rel}, issues: ${fileResult.messages.length}`);
     for (const msg of fileResult.messages) {
-      res.push({
-        file:    rel,
-        line:    msg.line,
-        rule:    msg.ruleId,
-        message: msg.message
-      });
+      res.push({ file:rel, line:msg.line, rule:msg.ruleId, message:msg.message });
     }
   }
-
-  if (!res.length) outputChannel.appendLine('[ESLint] none detected');
-  outputChannel.appendLine('[ESLint] done');
+  if (!signal.aborted) outputChannel.appendLine('[ESLint] done');
   return res;
 }
 
-
-async function checkSonar(ws) {
-  // 1) Run SonarLint
+async function checkSonar(ws, signal) {
+  if (signal.aborted) return { passed: true, summary: 'Skipped', metrics: {} };
   const lintBin = resolveCmd(ws, 'sonarlint');
   const srcDir  = path.join(ws, 'src');
   if (!lintBin || !fs.existsSync(srcDir)) {
@@ -1056,11 +1089,12 @@ async function checkSonar(ws) {
   try {
     ({ stdout } = await execP(
       `"${lintBin}" analyze --src "${srcDir}"`,
-      { cwd: ws, maxBuffer: 200 * 1024 * 1024, env: { ...process.env } }
+      { cwd: ws, maxBuffer: 200 * 1024 * 1024, env: { ...process.env }, signal }
     ));
   } catch (e) {
     stdout = e.stdout || '';
   }
+  if (signal.aborted) return { passed: true, summary: 'Aborted', metrics: {} };
 
   // 2) Parse only the “INFO: […]” lines
   const issues = stdout
@@ -1068,46 +1102,44 @@ async function checkSonar(ws) {
     .filter(l => /^\s*INFO: \[/.test(l))
     .map(l => {
       const txt = l.replace(/^\s*INFO:\s*/, '');
-      const m = txt.match(
-        /^\[([^\]]+)\]\s+(.+?):(\d+)(?::\d+)?\s+(\S+)\s*[-–]\s*(.*)$/
-      );
+      const m = txt.match(/^\[([^\]]+)\]\s+(.+?):(\d+)(?::\d+)?\s+(\S+)\s*[-–]\s*(.*)$/);
       return m && { severity: m[1].toUpperCase() };
     })
     .filter(Boolean);
 
-  const counts = issues.reduce((acc, { severity }) => {
-    acc[severity] = (acc[severity] || 0) + 1;
-    return acc;
+  // FIXED: remove the extra brace at the end of this line
+  const counts = issues.reduce((a, { severity }) => {
+    a[severity] = (a[severity] || 0) + 1;
+    return a;
   }, {});
 
   // 3) Run jscpd for duplication
-let dupPct = '—';
-try {
-  const { stdout } = await execP(
-    `npx jscpd --silent --format json src`,
-    { cwd: ws, env: { ...process.env }, maxBuffer: 200 * 1024 * 1024 }
-  );
-
-  // Safely extract only the JSON
-  const firstBrace = stdout.indexOf('{');
-  const lastBrace  = stdout.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace !== -1) {
-    const jsonPart = stdout.slice(firstBrace, lastBrace + 1);
-    const dupReport = JSON.parse(jsonPart);
-    dupPct = dupReport.statistics?.total?.percentage ?? '—';
-  } else {
-    outputChannel.appendLine('[SonarLint] jscpd: no JSON found');
+  let dupPct = '—';
+  if (!signal.aborted) {
+    try {
+      const { stdout: dupOut } = await execP(
+        'npx jscpd --silent --format json src',
+        { cwd: ws, env: { ...process.env }, maxBuffer: 200 * 1024 * 1024, signal }
+      );
+      const firstBrace = dupOut.indexOf('{');
+      const lastBrace  = dupOut.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1) {
+        const dupReport = JSON.parse(dupOut.slice(firstBrace, lastBrace + 1));
+        dupPct = dupReport.statistics?.total?.percentage ?? '—';
+      } else {
+        outputChannel.appendLine('[SonarLint] jscpd: no JSON found');
+      }
+    } catch {
+      /* ignore */
+    }
   }
-} catch (err) {
-  outputChannel.appendLine(`[SonarLint] jscpd failed: ${err.message}`);
-}
 
   // 4) Determine pass/fail
-  const high = (counts.BLOCKER||0) + (counts.CRITICAL||0) + (counts.MAJOR||0);
-  const passed  = high === 0;
+  const high = (counts.BLOCKER || 0) + (counts.CRITICAL || 0) + (counts.MAJOR || 0);
+  const passed = high === 0;
   const summary = passed
     ? '✅ No BLOCKER/CRITICAL/MAJOR issues'
-    : `❌ ${high} high-severity issue${high>1?'s':''} found`;
+    : `❌ ${high} high-severity issue${high > 1 ? 's' : ''} found`;
 
   outputChannel.appendLine(`[SonarLint] total issues: ${issues.length}`);
   outputChannel.appendLine(`[SonarLint] ${summary}`);
@@ -1126,284 +1158,95 @@ try {
 }
 
 
-
-
-async function checkComplexity(ws) {
+async function checkComplexity(ws, signal) {
   const fn = 'checkComplexity';
+  if (signal.aborted) return [];
   outputChannel.appendLine('[Complexity] start');
+  const tool = resolveCmd(ws,'plato');
+  if (!tool) { outputChannel.appendLine('[Complexity] done'); return []; }
+  const reportDir = path.join(ws,'report','plato'); fs.mkdirSync(reportDir,{recursive:true});
 
-  // 1) find the plato binary
-  const tool = resolveCmd(ws, 'plato');
-  if (!tool) {
-    outputChannel.appendLine(
-      "[Complexity] skipped — 'plato' not found; install with 'npm install --save-dev plato'"
-    );
-    outputChannel.appendLine('[Complexity] done');
-    return [];
-  }
-
-  // 2) prepare the report directory
-  const reportDir = path.join(ws, 'report', 'plato');
-  fs.mkdirSync(reportDir, { recursive: true });
-
-  // 3) run plato
-  const cmd = `"${tool}" -r -d "${reportDir}" src`;
+  let results=[];
   try {
-    await execP(cmd, { cwd: ws, maxBuffer: 209715200 });
-
-    const reportFile = path.join(reportDir, 'report.json');
-    if (!fs.existsSync(reportFile)) {
-      outputChannel.appendLine(
-        "[Complexity] no report.json found — did Plato actually run?"
-      );
-      outputChannel.appendLine('[Complexity] done');
-      return [];
+    await execP(`"${tool}" -r -d "${reportDir}" src`,{cwd:ws,signal,maxBuffer:209715200});
+    if (signal.aborted) return [];
+    const reportFile = path.join(reportDir,'report.json');
+    if (fs.existsSync(reportFile)) {
+      const raw = fs.readFileSync(reportFile,'utf8');
+      const data = JSON.parse(raw);
+      const reports = Array.isArray(data.reports)? data.reports : [];
+      results = reports.map(r=>{
+        const comp = r.complexity||{};
+        const sloc = comp.sloc||{};
+        const logical = typeof sloc.logical==='number'? sloc.logical: typeof sloc.physical==='number'? sloc.physical:0;
+        return { path: path.relative(ws,r.info.file||''), aggregate:{cyclomatic:comp.cyclomatic||0,sloc:logical,maintainability:comp.maintainability||0} };
+      });
     }
-
-    // 4) parse the JSON
-    const raw  = fs.readFileSync(reportFile, 'utf8');
-    const data = JSON.parse(raw);
-
-    // 5) map over data.reports (always an array)
-    const reports = Array.isArray(data.reports) ? data.reports : [];
-    const results = reports.map(r => {
-      const comp = r.complexity || {};
-      const sloc = comp.sloc || {};
-
-      // pick the logical SLOC if present, else physical, else 0
-      const logicalSLOC =
-        typeof sloc.logical === 'number'
-          ? sloc.logical
-          : typeof sloc.physical === 'number'
-          ? sloc.physical
-          : 0;
-
-      return {
-        path: path.relative(ws, r.info.file || ''),
-        aggregate: {
-          cyclomatic:      typeof comp.cyclomatic     === 'number' ? comp.cyclomatic     : 0,
-          sloc:            logicalSLOC,
-          maintainability: typeof comp.maintainability === 'number' ? comp.maintainability : 0
-        }
-      };
-    });
-
-    if (!results.length) {
-      outputChannel.appendLine('[Complexity] none detected');
-    }
-
-    return results;
-  } catch (e) {
-    logError(fn, e);
-    outputChannel.appendLine(
-      "[Complexity] failed — check that 'plato' is installed and your source directory exists"
-    );
-    return [];
-  } finally {
-    outputChannel.appendLine('[Complexity] done');
-  }
+  } catch(e) { logError(fn,e); }
+  if (!signal.aborted) outputChannel.appendLine('[Complexity] done');
+  return results;
 }
-	
-// ─── DUPLICATION SCAN ───────────────────────────────────────────────────────────
 
-
-async function checkDuplication(ws) {
+async function checkDuplication(ws, signal) {
   const fn = 'checkDuplication';
+  if (signal.aborted) return [];
   outputChannel.appendLine('[Duplication] start');
+  const projectRoot = ws.replace(/\\/g,'/');
+  const patterns = [`${projectRoot}/*.js`,`${projectRoot}/*.ts`,`${projectRoot}/src/**/*.js`,`${projectRoot}/src/**/*.ts`];
+  let files=[];
+  try { files = await fg(patterns,{absolute:true,onlyFiles:true}); } catch(e){ logError(fn,e); }
+  if (!files.length || signal.aborted) { outputChannel.appendLine('[Duplication] done'); return []; }
 
-  // 1) Normalize to forward-slashes
-  const projectRoot = ws.replace(/\\/g, '/');
-
-  // 2) Build glob patterns against that
-  const patterns = [
-    `${projectRoot}/*.js`,
-    `${projectRoot}/*.ts`,
-    `${projectRoot}/src/**/*.js`,
-    `${projectRoot}/src/**/*.ts`
-  ];
-  outputChannel.appendLine(`[Duplication] glob patterns: ${patterns.join(', ')}`);
-
-  let files;
+  let raw='';
   try {
-    files = await fg(patterns, { absolute: true, onlyFiles: true });
-  } catch (e) {
-    logError(fn, e);
-    outputChannel.appendLine('[Duplication] error resolving files');
-    outputChannel.appendLine('[Duplication] done');
-    return [];
-  }
+    const cmd = `${resolveCmd(ws,'jsinspect')||'npx jsinspect'} --identical --threshold 3 --reporter json ${files.map(f=>`"${f}"`).join(' ')}`;
+    const out = await execP(cmd,{cwd:ws,signal,maxBuffer:524288000});
+    raw = (out.stdout||'').trim()||(out.stderr||'').trim();
+  } catch(e){ if (!signal.aborted) raw=(e.stdout||'').trim()||(e.stderr||'').trim(); }
+  if (signal.aborted) return [];
 
-  if (!files.length) {
-    outputChannel.appendLine('[Duplication] no files to scan');
-    outputChannel.appendLine('[Duplication] done');
-    return [];
-  }
+  const idx = raw.indexOf('[');
+  const jsonText = idx>=0 ? raw.slice(idx) : raw;
+  let matches=[];
+  try { matches = JSON.parse(jsonText); } catch(pe){ logError(fn,pe); }
 
-  // 3) Log each file
-  files.forEach(f => {
-    const rel = path.relative(ws, f);
-    outputChannel.appendLine(`[Duplication] checking file: ${rel}`);
-  });
-
-  // 4) Run jsinspect
-  const inspector = resolveCmd(ws, 'jsinspect') || 'npx jsinspect';
-  const threshold = 3;
-  const fileArgs  = files.map(f => `"${f}"`).join(' ');
-  const cmd       = `${inspector} --identical --threshold ${threshold} --reporter json ${fileArgs}`;
-
-  let raw = '';
-  try {
-    outputChannel.appendLine(`[Duplication] running: ${cmd}`);
-    const { stdout, stderr } = await execP(cmd, { cwd: ws, maxBuffer: 524288000 });
-    raw = (stdout || '').trim() || (stderr || '').trim();
-  } catch (e) {
-    raw = (e.stdout || '').trim() || (e.stderr || '').trim();
-  }
-
-  outputChannel.appendLine(`[Duplication] raw output:\n${raw}`);
-
-  // 5) Parse JSON
-  const idx      = raw.indexOf('[');
-  const jsonText = idx >= 0 ? raw.slice(idx) : raw;
-  let matches;
-  try {
-    matches = JSON.parse(jsonText);
-  } catch (pe) {
-    logError(fn, pe);
-    outputChannel.appendLine('[Duplication] parse failed');
-    outputChannel.appendLine('[Duplication] done');
-    return [];
-  }
-
-  // 6) Format results
-  const res = [];
+  const res=[];
   for (const m of matches) {
-    const inst = m.instances || [];
-    for (let i = 0; i < inst.length; i++) {
-      for (let j = i + 1; j < inst.length; j++) {
-        res.push({
-          fileA: path.relative(ws, inst[i].path),
-          lineA: inst[i].lines[0],
-          fileB: path.relative(ws, inst[j].path),
-          lineB: inst[j].lines[0]
-        });
-      }
+    if (signal.aborted) break;
+    const inst = m.instances||[];
+    for (let i=0;i<inst.length;i++) for (let j=i+1;j<inst.length;j++) {
+      res.push({ fileA:path.relative(ws,inst[i].path), lineA:inst[i].lines[0], fileB:path.relative(ws,inst[j].path), lineB:inst[j].lines[0] });
     }
   }
-
-  if (!res.length) outputChannel.appendLine('[Duplication] none');
-  outputChannel.appendLine('[Duplication] done');
+  if (!signal.aborted) outputChannel.appendLine('[Duplication] done');
   return res;
 }
 
-async function handleChat(text) {
-  chatHistory.push({ from: 'You', text });
-  const cfg    = vscode.workspace.getConfiguration('deptrack.chatbot');
-  const apiKey = cfg.get('apiKey');
-  const model  = cfg.get('model') || 'gpt-3.5-turbo';
-  let reply = '';
-  if (!apiKey) {
-    reply = '❌ Set API key';
-  } else {
-    try {
-      const res = await axios.post(
-        'https://api.openai.com/v1/chat/completions',
-        { model, messages: [{ role: 'user', content: text }] },
-        { headers: { Authorization: `Bearer ${apiKey}` } }
-      );
-      reply = res.data.choices[0].message.content.trim();
-    } catch (e) {
-      logError('handleChat', e);
-      reply = '❌ Chat error';
-    }
-  }
-  chatHistory.push({ from: 'Bot', text: reply });
-  panel && panel.webview.postMessage({ command: 'chatResponse', payload: { text: reply } });
-}
-
-async function getSuggestedFixes({
-  outdated = {},
-  vuln = {},
-  licenseIssues = [],
-  eslintDetails = [],
-  duplicationDetails = [],
-  secrets = []
-}) {
+async function getSuggestedFixes({ outdated={}, vuln={}, licenseIssues=[], eslintDetails=[], duplicationDetails=[], secrets=[] }, signal) {
+  if (signal.aborted) return [];
   const fixes = [];
-
-  // 1) Outdated packages
   for (const [pkg, info] of Object.entries(outdated)) {
-    fixes.push({
-      pkg,
-      fix: `Update to ${info.latest}`
-    });
+    fixes.push({ pkg, fix: `Update to ${info.latest}` });
   }
-
-  // 2) Vulnerabilities
-  for (const [pkg, list] of Object.entries(vuln)) {
-    list.forEach(v => {
-      // if Snyk already suggests "patch" or "upgrade", use that; otherwise offer generic advice
-      const suggestion = /upgrade to ([\d.]+)/i.exec(v.title)
-        ? `Upgrade to ${RegExp.$1}`
-        : v.title.startsWith('Insecure')
-          ? `Review & patch vulnerability`
-          : `Review vulnerability: "${v.title}"`;
-      fixes.push({ pkg, fix: suggestion });
-    });
+  if (signal.aborted) return fixes;
+  for (const [pkg, list] of Object.entries(vuln)) list.forEach(v => fixes.push({ pkg, fix: /upgrade to ([\d.]+)/i.test(v.title) ? `Upgrade to ${RegExp.$1}` : v.title.startsWith('Insecure') ? 'Review & patch vulnerability' : `Review vulnerability: "${v.title}"` }));
+  if (signal.aborted) return fixes;
+  licenseIssues.forEach(x=>fixes.push({ pkg: x.pkg, fix: `Consider replacing or upgrading (forbidden: ${x.licenses.join(', ')})`}));
+  if (signal.aborted) return fixes;
+  const eslintByFile = eslintDetails.reduce((acc,e)=>(acc[e.file]||(acc[e.file]=[])).push(e),{});
+  for (const [file,msgs] of Object.entries(eslintByFile)) {
+    if (signal.aborted) break;
+    fixes.push({ pkg:file, fix: msgs.some(m=>m.rule&&m.rule!=='semi') ? `eslint --fix "${file}"` : 'Add missing semicolons' });
   }
-
-  // 3) Forbidden‐license issues
-  licenseIssues.forEach(x => {
-    fixes.push({
-      pkg: x.pkg,
-      fix: `Consider replacing or upgrading (forbidden: ${x.licenses.join(', ')})`
-    });
-  });
-
-  // 4) ESLint issues
-  // Group by file: if any errors exist, recommend full auto‐fix; else suggest specific rule
-  const eslintByFile = eslintDetails.reduce((acc, e) => {
-    (acc[e.file] ||= []).push(e);
-    return acc;
-  }, {});
-  for (const [file, msgs] of Object.entries(eslintByFile)) {
-    fixes.push({
-      pkg: file,
-      fix: msgs.some(m => m.rule && m.rule !== 'semi')
-        ? `Run \`eslint --fix "${file}"\``
-        : `Add missing semicolons (rule: semi)`
-    });
-  }
-
-  // 5) Secret leaks
-  secrets.forEach(s => {
-    fixes.push({
-      pkg: s.file,
-      fix: `Remove hard‐coded ${s.rule} and inject via secure env variable`
-    });
-  });
-
-  // 6) Code duplication
-  // For each pair, suggest function extraction
-  duplicationDetails.forEach(d => {
-    fixes.push({
-      pkg: `${d.fileA} & ${d.fileB}`,
-      fix: `Extract common logic at lines ${d.lineA}/${d.lineB} into shared function`
-    });
-  });
-
-  // 7) (Optional) Complexity
-  // If you want to flag super‐complex files, e.g. cyclomatic > 10, you could:
-  // complexity.forEach(c => { ... });
-
+  if (signal.aborted) return fixes;
+  secrets.forEach(s=>fixes.push({ pkg: s.file, fix: `Remove hard‐coded ${s.rule} and inject via secure env variable`}));
+  if (signal.aborted) return fixes;
+  duplicationDetails.forEach(d=>fixes.push({ pkg:`${d.fileA} & ${d.fileB}`, fix: `Extract common logic at lines ${d.lineA}/${d.lineB}`}));
   return fixes;
 }
 
 
-<<<<<<< HEAD
 
-=======
->>>>>>> 3fe54b9 (Dashboard updated)
 
 let webviewPanel; // you’ll need to set this when you create your WebviewPanel
 
@@ -1450,11 +1293,23 @@ async function sendEmailNotification(subject, text, overrideTo, attachments = []
 /**
  * Helper to run a check with an AbortSignal
  */
-function withAbort(viewName, checkFn) {
+async function withAbort(viewName, checkFn) {
   const controller = new AbortController();
   abortControllers[viewName] = controller;
-  return checkFn(controller.signal);
+  try {
+    // call checkFn with the signal
+    await checkFn(controller.signal);
+  } catch (err) {
+    if (controller.signal.aborted) {
+      outputChannel.appendLine(`[${viewName}] aborted`);
+    } else {
+      throw err;
+    }
+  } finally {
+    delete abortControllers[viewName];
+  }
 }
+
 // Example: hook up your message handler so that `sendEmail` command invokes this
 function registerMessageListener(panel) {
   webviewPanel = panel;  // capture your WebviewPanel instance

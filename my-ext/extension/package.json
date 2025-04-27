@@ -7,7 +7,7 @@
   "engines": {
     "vscode": "^1.88.0"
   },
-  "main": "./src/extension.cjs",
+  "main": "./dist/index.js",
   "activationEvents": [
     "onCommand:Aman.deptrack.openDashboard",
     "onCommand:Aman.deptrack.refresh",
@@ -97,7 +97,7 @@
     }
   },
   "scripts": {
-     "build": "echo 'No build necessary'",
+    "build": "ncc build src/extension.cjs -o dist",
     "watch:build": "chokidar 'src/**/*' -c 'npm run build'",
     "lint": "eslint .",
     "duplication": "jscpd src --reporters json --output report",
