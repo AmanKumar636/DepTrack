@@ -100,6 +100,7 @@
      "build": "echo 'No build necessary'",
     "watch:build": "chokidar 'src/**/*' -c 'npm run build'",
     "lint": "eslint .",
+	"lint:sonar": "sonarlint --src 'src/**/*.js'",
     "duplication": "jscpd src --reporters json --output report",
     "dup": "jscpd . --min-lines 1 --reporters console,json --output report/jscpd --ignore \"node_modules/**\" --ignore \"dist/**\" --ignore \"report/**\"",
     "test": "jest",
