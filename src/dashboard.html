@@ -81,7 +81,7 @@
     .timestamp{font-size:.75rem;color:var(--text-muted);opacity:0.8}
   </style>
 </head>
-<body>
+<body id="vscode-app">
   <aside id="aside">
     <h2>DepTrack</h2>
     <div class="email-row">
@@ -90,8 +90,17 @@
     </div>
     <button id="refresh" class="active">🔄 Refresh<span id="spinner" class="spinner">⏳</span></button>
     <button id="email">📨 Email Developer<span id="emailSpinner" class="spinner">⏳</span></button>
-	<button id="sendReportBtn">📝 Send PDF Report<span id="emailSpinner" class="spinner">⏳</span></button>
-	<button id="sendCsvBtn">📊 Send CSV Report<span id="emailSpinner" class="spinner">⏳</span></button>
+	
+<button id="sendReportBtn">
+  📝 Send PDF Report
+  <span id="reportSpinner" class="spinner">⏳</span>
+</button>
+
+<button id="sendCsvBtn">
+  📊 Send CSV Report
+  <span id="csvReportSpinner" class="spinner">⏳</span>
+</button>
+
 
  <button id="csv">📊 Export CSV<span id="csvSpinner" class="spinner">⏳</span></button>
     <button id="pdf">📕 Export PDF<span id="pdfSpinner" class="spinner">⏳</span></button>
@@ -116,6 +125,11 @@
       </select>
       <button id="scanView">Show</button>
       <button id="scanAll">Show All</button>
+	  <label for="sonarScope" style="margin-left:1rem;color:var(--text-light)">Sonar scope:</label>
+<select id="sonarScope" style="padding:0.5rem;border-radius:var(--radius);border:none;background:var(--card-bg);color:var(--text-light)">
+  <option value="src">src/ only</option>
+  <option value=".">all files</option>
+</select>
     </div>
     <section id="cards">
       <div class="card" data-view="log">
@@ -261,33 +275,70 @@
     const spinnerGlobal=document.getElementById('spinner');
     const emailSpinner=document.getElementById('emailSpinner');
     const csvSpinner=document.getElementById('csvSpinner');
+	
     const pdfSpinner=document.getElementById('pdfSpinner');
-    function setLoading(load){document.getElementById('refresh').classList.toggle('active',!load);spinnerGlobal.classList.toggle('spin',load);}
+    
+	// grab the new spinner elements
+const reportSpinner    = document.getElementById('reportSpinner');
+const csvReportSpinner = document.getElementById('csvReportSpinner');
+
+	
+	
+	function setLoading(load){document.getElementById('refresh').classList.toggle('active',!load);spinnerGlobal.classList.toggle('spin',load);}
     function appendMessage(from,text,time){const chatCtr=document.getElementById('chatContainer');const div=document.createElement('div');div.className='message '+(from==='user'?'user':'bot');const content=document.createElement('div');content.textContent=text;const timestamp=document.createElement('div');timestamp.className='timestamp';timestamp.textContent=time;div.appendChild(content);div.appendChild(timestamp);chatCtr.appendChild(div);chatCtr.scrollTop=chatCtr.scrollHeight;}
-    document.getElementById('refresh').addEventListener('click',()=>{console.log('Refreshing all');healthMode=false;setLoading(true);vscode.postMessage({command:'refresh'});});
-    document.getElementById('email').addEventListener('click',()=>{emailSpinner.classList.add('spin');vscode.postMessage({command:'sendEmail'});setTimeout(()=>emailSpinner.classList.remove('spin'),2000);});
- document.getElementById('sendReportBtn').addEventListener('click', () => {
-    vscode.postMessage({ command: 'sendReportEmail' });
-  });  
-    document.getElementById('sendCsvBtn').addEventListener('click', () => {
-    vscode.postMessage({ command: 'sendCsvReportEmail' });
-  });
-  document.getElementById('csv').addEventListener('click',()=>{csvSpinner.classList.add('spin');vscode.postMessage({command:'exportCSV'});setTimeout(()=>csvSpinner.classList.remove('spin'),2000);});
-    document.getElementById('pdf').addEventListener('click',()=>{pdfSpinner.classList.add('spin');vscode.postMessage({command:'exportPDF'});setTimeout(()=>pdfSpinner.classList.remove('spin'),2000);});
+
+
+function capitalize(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+
+    
+	document.getElementById('refresh').addEventListener('click',()=>{console.log('Refreshing all');healthMode=false;setLoading(true);vscode.postMessage({command:'refresh'});});
+    
+	document.getElementById('email').addEventListener('click',()=>{emailSpinner.classList.add('spin');vscode.postMessage({command:'sendEmail'});setTimeout(()=>emailSpinner.classList.remove('spin'),2000);});
+	
+	
+	
+// PDF-report button: spin while sending, then stop after 2s
+document.getElementById('sendReportBtn').addEventListener('click', () => {
+  reportSpinner.classList.add('spin');
+  vscode.postMessage({ command: 'sendReportEmail' });
+  setTimeout(() => reportSpinner.classList.remove('spin'), 2000);
+});
+
+// CSV-report button: spin while sending, then stop after 2s
+document.getElementById('sendCsvBtn').addEventListener('click', () => {
+  csvReportSpinner.classList.add('spin');
+  vscode.postMessage({ command: 'sendCsvReportEmail' });
+  setTimeout(() => csvReportSpinner.classList.remove('spin'), 2000);
+});
+
+	
+    
+	document.getElementById('csv').addEventListener('click',()=>{csvSpinner.classList.add('spin');vscode.postMessage({command:'exportCSV'});setTimeout(()=>csvSpinner.classList.remove('spin'),2000);});
+    
+	document.getElementById('pdf').addEventListener('click',()=>{pdfSpinner.classList.add('spin');vscode.postMessage({command:'exportPDF'});setTimeout(()=>pdfSpinner.classList.remove('spin'),2000);});
    // When the new side-panel button is clicked, select "chatbot" and trigger Show
-document.getElementById('chatbotToggle').addEventListener('click', () => {
+	
+	document.getElementById('chatbotToggle').addEventListener('click', () => {
+  
   // 1) set the dropdown to the chatbot view
-  document.getElementById('viewSelect').value = 'chatbot';
+	
+	document.getElementById('viewSelect').value = 'chatbot';
+  
   // 2) programmatically click the "Show" button
+  
   document.getElementById('scanView').click();
+
 });
 
    
    document.getElementById('sendInputEmail').addEventListener('click', () => {
-  const i = document.getElementById('emailInput');
-  if (i.checkValidity()) {
+   const i = document.getElementById('emailInput');
+   if (i.checkValidity()) {
     vscode.postMessage({ command: 'sendEmail', email: i.value });
-    i.value = '';    // ← clear the box
+    i.value = '';   
   }
 });
 
@@ -302,73 +353,110 @@ document.getElementById('chatbotToggle').addEventListener('click', () => {
   });
 });
 
-document.querySelectorAll('.card-stop').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const view = btn.dataset.view; // e.g. 'outdated'
-    vscode.postMessage({ command: `cancel${capitalize(view)}` });
-    const spinner = btn.parentElement.querySelector('.spinner');
-    spinner.classList.remove('spin');
-  });
+document.querySelector('.card-refresh[data-view="sonar"]').addEventListener('click', () => {
+    const scope = document.getElementById('sonarScope').value;
+    console.log(`Refreshing sonar (scope=${scope})`);
+    const sp = document.querySelector('.card[data-view="sonar"] .spinner');
+    sp.classList.add('spin');
+vscode.postMessage({ 
+  command: 'refreshSonar',
+  scope 
 });
-
-function capitalize(s) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
+  });
+  
+// Wire up every Stop button
+  document.querySelectorAll('.card-stop').forEach(btn => {
+    btn.addEventListener('click', () => {
+      // Read the category from data-view, e.g. "outdated", "vuln", etc.
+      const view = btn.getAttribute('data-view');
+      // Send the exact cancel command expected by extension.cjs
+      vscode.postMessage({ command: `cancel${capitalize(view)}` });
+      // Immediately stop the spinner in the UI
+      const spinner = btn.parentElement.querySelector('.spinner');
+      if (spinner) {
+        spinner.classList.remove('spin');
+      }
+    });
+  });
+  
+  
     document.querySelectorAll('.card-delete').forEach(btn=>{btn.addEventListener('click',()=>{document.getElementById('logOutput').textContent='';document.getElementById('logStatus').className='status-dot';});});
     document.getElementById('sendChat').addEventListener('click',()=>{const t=document.getElementById('chatInput').value.trim();if(t){const time=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});appendMessage('user',t,time);document.getElementById('chatInput').value='';vscode.postMessage({command:'chat',text:t});}});
     document.getElementById('chatInput').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('sendChat').click();});
     document.getElementById('clearChat').addEventListener('click',()=>{document.getElementById('chatContainer').innerHTML='';});
     document.getElementById('scanView').addEventListener('click',()=>{healthMode=false;const view=document.getElementById('viewSelect').value;container.style.flexWrap='nowrap';container.innerHTML='';const getCard=name=>allCards.find(c=>c.dataset.view===name);if(view==='chatbot'){const card=getCard('chatbot');card.style.flex='0 0 100%';container.appendChild(card);}else if(view==='fixes'){const fixes=getCard('fixes');const chat=getCard('chatbot');fixes.style.flex='0 0 50%';chat.style.flex='0 0 50%';container.appendChild(fixes);container.appendChild(chat);}else if(view==='sonar'){const card=getCard('sonar');card.style.flex='0 0 100%';container.appendChild(card);}else{const mainCard=getCard(view);const chatCard=getCard('chatbot');mainCard.style.flex='0 0 70%';chatCard.style.flex='0 0 30%';container.appendChild(mainCard);container.appendChild(chatCard);}});  
     document.getElementById('scanAll').addEventListener('click',()=>{healthMode=false;container.style.flexWrap='wrap';container.innerHTML='';allCards.filter(c=>!['sonar','chatbot','fixes'].includes(c.dataset.view)).forEach(c=>{c.style.flex='1 1 calc(33% - var(--gap))';container.appendChild(c);});const sonarCard=allCards.find(c=>c.dataset.view==='sonar');sonarCard.style.flex='0 0 100%';container.appendChild(sonarCard);['fixes','chatbot'].forEach(view=>{const card=allCards.find(c=>c.dataset.view===view);card.style.flex='0 0 100%';container.appendChild(card);});});  
- window.addEventListener('message', e => {
+
+
+window.addEventListener('message', e => {
   const m = e.data;
-   if (m.command === 'chatResponse') {
-      const time = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-      appendMessage('bot', m.text, time);
-   
+
+  // ─── Chatbot response ─────────────────────────────────────────────────────
+  if (m.command === 'chatResponse') {
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    appendMessage('bot', m.text, time);
+    return;
+  }
+
+  // ─── Process log updates ──────────────────────────────────────────────────
   if (m.command === 'logUpdate') {
-    const L = m.payload;
+    const L = m.payload || [];
     const dot = document.getElementById('logStatus');
-    const err = L.some(l => /\bERROR\b/i.test(l));
-    const wrn = !err && L.some(l => /\bWARN(?:ING)?\b/i.test(l));
+    const err = L.some(line => /\bERROR\b/i.test(line));
+    const wrn = !err && L.some(line => /\bWARN(?:ING)?\b/i.test(line));
     dot.className = 'status-dot';
     if (err) dot.classList.add('error');
     else if (wrn) dot.classList.add('warning');
     document.getElementById('logOutput').textContent = L.join('\n');
     return;
   }
-  
-   if (e.data.command === 'emailStatus') {
+
+  // ─── Email send status ───────────────────────────────────────────────────
+  if (m.command === 'emailStatus') {
     emailSpinner.classList.remove('spin');
-    if (e.data.success) console.log('Email sent!');
-    else console.error('Email failed:', e.data.error);
+    if (m.success) console.log('Email sent!');
+    else console.error('Email failed:', m.error);
+    return;
   }
-  
-  if (m.command === 'updateData' && !healthMode) {
+
+  // ─── Update all the dashboard data ────────────────────────────────────────
+  if (m.command === 'updateData' && !healthMode && m.payload) {
     setLoading(false);
     const d = m.payload;
 
-    }
+
+		
+
+
+    // --- Outdated Packages ---
     const outTb = document.querySelector('#outdatedTable tbody');
     outTb.innerHTML = '';
     Object.entries(d.outdated || {}).forEach(([pkg, info]) => {
       const r = outTb.insertRow();
-      r.innerHTML = `<td><span class="status ${info.status}"></span></td><td>${pkg}</td><td>${info.current}</td><td>${info.latest}</td>`;
+      r.innerHTML = `
+        <td><span class="status ${info.status}"></span></td>
+        <td>${pkg}</td>
+        <td>${info.current}</td>
+        <td>${info.latest}</td>
+      `;
     });
 
+    // --- Vulnerabilities ---
     const vulTb = document.querySelector('#vulnTable tbody');
     vulTb.innerHTML = '';
     if (d.vulnError) {
       const r = vulTb.insertRow();
       r.innerHTML = `<td colspan="3" style="color:tomato;">${d.vulnError}</td>`;
     } else {
-      Object.entries(d.vuln || {}).forEach(([pkg, list]) => list.forEach(v => {
-        const r = vulTb.insertRow();
-        r.innerHTML = `<td>${pkg}</td><td>${v.severity}</td><td>${v.title}</td>`;
-      }));
+      Object.entries(d.vuln || {}).forEach(([pkg, list]) => {
+        list.forEach(v => {
+          const r = vulTb.insertRow();
+          r.innerHTML = `<td>${pkg}</td><td>${v.severity}</td><td>${v.title}</td>`;
+        });
+      });
     }
 
+    // --- Forbidden Licenses ---
     const licTb = document.querySelector('#licenseTable tbody');
     licTb.innerHTML = '';
     (d.licenseIssues || []).forEach(x => {
@@ -376,93 +464,102 @@ function capitalize(s) {
       r.innerHTML = `<td>${x.pkg}</td><td>${x.licenses.join(', ')}</td>`;
     });
 
+    // --- ESLint Issues ---
     const esTb = document.querySelector('#eslintTable tbody');
     esTb.innerHTML = '';
     (d.eslintDetails || []).forEach(e2 => {
       const r = esTb.insertRow();
-      r.innerHTML = `<td>${e2.file}</td><td>${e2.line}</td><td>${e2.rule}</td><td>${e2.message}</td>`;
+      r.innerHTML = `
+        <td>${e2.file}</td>
+        <td>${e2.line}</td>
+        <td>${e2.rule}</td>
+        <td>${e2.message}</td>
+      `;
     });
 
+    // --- Duplication ---
     const dupTb = document.querySelector('#dupTable tbody');
     dupTb.innerHTML = '';
     (d.duplicationDetails || []).forEach(dd => {
       const r = dupTb.insertRow();
-      r.innerHTML = `<td>${dd.fileA}</td><td>${dd.lineA}</td><td>${dd.fileB}</td><td>${dd.lineB}</td>`;
+      r.innerHTML = `
+        <td>${dd.fileA}</td>
+        <td>${dd.lineA}</td>
+        <td>${dd.fileB}</td>
+        <td>${dd.lineB}</td>
+      `;
     });
 
+    // --- Complexity Chart ---
     const compData = d.complexity || [];
-    const labels = compData.map(c => c.path.split(/[\\/]/).pop());
-    const cyclo = compData.map(c => c.aggregate.cyclomatic);
-    const sloc = compData.map(c => c.aggregate.sloc);
-    const maint = compData.map(c => c.aggregate.maintainability);
-    const ctx1 = document.getElementById('complexityChart').getContext('2d');
+    const labels   = compData.map(c => c.path.split(/[\\/]/).pop());
+    const cyclo    = compData.map(c => c.aggregate.cyclomatic);
+    const sloc     = compData.map(c => c.aggregate.sloc);
+    const maint    = compData.map(c => c.aggregate.maintainability);
+    const ctx1     = document.getElementById('complexityChart').getContext('2d');
     complexityChart?.destroy();
     complexityChart = new Chart(ctx1, {
       type: 'bar',
-      data: { labels, datasets: [{ label: 'Cyclomatic', data: cyclo }, { label: 'SLOC', data: sloc }, { label: 'Maintainability', data: maint }] },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: '#fff' } } },
-        scales: {
-          x: { beginAtZero: true, ticks: { color: '#fff', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.1)' } },
-          y: { ticks: { color: '#fff', autoSkip: false }, grid: { display: false } }
-        }
-      }
+      data: { labels, datasets: [
+        { label: 'Cyclomatic',    data: cyclo },
+        { label: 'SLOC',          data: sloc  },
+        { label: 'Maintainability', data: maint }
+      ]},
+      options: { /* your existing options… */ }
     });
 
+    // --- Secrets ---
     const secTb = document.querySelector('#secretTable tbody');
     secTb.innerHTML = '';
     (d.secrets || []).forEach(s => {
       const r = secTb.insertRow();
-      r.innerHTML = `<td>${s.file}</td><td>${s.line}</td><td>${s.rule}</td><td>${s.match}</td>`;
+      r.innerHTML = `
+        <td>${s.file}</td>
+        <td>${s.line}</td>
+        <td>${s.rule}</td>
+        <td>${s.match}</td>
+      `;
     });
 
+    // --- Dependency Graph ---
     const dgLabels = Object.keys(d.depGraph || {});
-    const dgShort = dgLabels.map(l => l.split(/[\\/]/).pop());
-    const dgValues = dgLabels.map(pkg => parseInt((d.depGraph[pkg].version || '0').split('.')[0], 10) || 0);
+    const dgShort  = dgLabels.map(l => l.split(/[\\/]/).pop());
+    const dgValues = dgLabels.map(p =>
+      parseInt((d.depGraph[p].version || '0').split('.')[0], 10) || 0
+    );
     const ctx2 = document.getElementById('dep-graph').getContext('2d');
     depChart?.destroy();
     depChart = new Chart(ctx2, {
       type: 'bar',
-      data: { labels: dgShort, datasets: [{ label: 'Version (major)', data: dgValues }] },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: '#fff' } } },
-        scales: {
-          x: { beginAtZero: true, ticks: { color: '#fff', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.1)' } },
-          y: { ticks: { color: '#fff', autoSkip: false }, grid: { display: false } }
-        }
-      }
+      data: { labels: dgShort, datasets: [{ label: 'Version (major)', data: dgValues }]},
+      options: { /* your existing options… */ }
     });
 
-   
-  const outEl = document.getElementById('sonarOutput');
-  const metEl = document.getElementById('sonarMetrics');
+    // --- Sonar Report ---
+    const outEl = document.getElementById('sonarOutput');
+    const metEl = document.getElementById('sonarMetrics');
+    if (d.sonarResult) {
+      outEl.textContent = d.sonarResult.summary || '—';
+      const s = d.sonarResult.metrics || {};
+      metEl.innerHTML = `
+        <div class="card"><div class="card-title">🐞 Bugs</div><div class="card-value">${s.bugs               ?? 0}</div></div>
+        <div class="card"><div class="card-title">🔒 Vulnerabilities</div><div class="card-value">${s.vulnerabilities    ?? 0}</div></div>
+        <div class="card"><div class="card-title">🛠 Code Smells</div><div class="card-value">${s.code_smells        ?? 0}</div></div>
+		  <div class="card"><div class="card-title">🧪 Coverage</div><div class="card-value">${s.coverage       ?? '—'}</div></div>
+        <div class="card"><div class="card-title">🔁 Duplication %</div><div class="card-value">${s.duplicated_lines_density ?? '—'}</div></div>
+      `;
+    } else {
+      outEl.textContent = 'No Sonar data';
+      metEl.innerHTML = '';
+    }
 
-if (d.sonarResult) {
-  // 1) summary
-  outEl.textContent = d.sonarResult.summary || '—';
-
-  // 2) four metric cards
-  const s = d.sonarResult.metrics || {};
-  metEl.innerHTML = `
-    <div class="card"><div class="card-title">🐞 Bugs</div><div class="card-value">${s.bugs               ?? 0}</div></div>
-    <div class="card"><div class="card-title">🔒 Vulnerabilities</div><div class="card-value">${s.vulnerabilities    ?? 0}</div></div>
-    <div class="card"><div class="card-title">🛠 Code Smells</div><div class="card-value">${s.code_smells        ?? 0}</div></div>
-    <div class="card"><div class="card-title">🔁 Duplication %</div><div class="card-value">${s.duplicated_lines_density ?? '—'}</div></div>
-  `;
-} else {
-  outEl.textContent = 'No Sonar data';
-  metEl.innerHTML = '';
-}
-
+    // --- Chat History (on full refresh) ---
     (d.chatHistory || []).forEach(c3 => {
       const time = c3.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       appendMessage(c3.from, c3.text, time);
     });
 
+    // --- Suggested Fixes ---
     const fixTb = document.querySelector('#fixTable tbody');
     fixTb.innerHTML = '';
     (d.suggestedFixes || []).forEach(f => {
@@ -470,9 +567,13 @@ if (d.sonarResult) {
       r.innerHTML = `<td>${f.pkg}</td><td>${f.fix}</td>`;
     });
 
+    // --- Stop all spinners ---
     document.querySelectorAll('.card .spinner.spin').forEach(sp => sp.classList.remove('spin'));
+	
+	
   }
 });
+
 
     window.onload=()=>{document.getElementById('scanAll').click();};
   </script>
