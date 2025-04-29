@@ -85,6 +85,7 @@ const abortControllers = {};
 
 let extensionContext;
 async function activate(context) {
+ const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   extensionContext = context;
 
   // 1) Create and wrap your output channel for logging
@@ -128,132 +129,209 @@ async function activate(context) {
       panel.webview.postMessage({ command: 'chatResponse', text: '🔥 Test message!' });
 
       // Handle incoming messages
-      panel.webview.onDidReceiveMessage(async m => {
-        outputChannel.appendLine(`Received command: ${m.command}`);
-        try {
-          switch (m.command) {
-            // Bulk scans
-            case 'refresh':
-            case 'scanAll':
-              return withAbort('all', runAllChecks);
-            case 'scanView':
-              return runView(m.view);
+   panel.webview.onDidReceiveMessage(async m => {
+  outputChannel.appendLine(`Received command: ${m.command}`);
+  try {
+    switch (m.command) {
+      case 'refresh':
+      case 'scanAll':
+        return withAbort('all', runAllChecks);
 
-            // Send email notifications
-            case 'sendEmail': {
-              const cfg = vscode.workspace.getConfiguration('deptrack.email');
-              const to = m.email || cfg.get('to');
-              return sendEmailNotification(
-                'DepTrack Scan Results',
-                'Your dependency scan has completed. See your dashboard for details.',
-                to
-              );
-            }
-            case 'sendReportEmail': {
-              const wf = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-              if (!wf) {
-                panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'No workspace open' });
-                break;
-              }
-              const pdfPath = path.join(wf, 'deptrack-report.pdf');
-              if (!fs.existsSync(pdfPath)) {
-                panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'deptrack-report.pdf not found' });
-                break;
-              }
-              const toCfg = vscode.workspace.getConfiguration('deptrack.email').get('to');
-              return sendEmailNotification(
-                'DepTrack PDF Report',
-                'Attached is the latest DepTrack PDF report.',
-                toCfg,
-                [{ filename: 'deptrack-report.pdf', path: pdfPath }]
-              );
-            }
-            case 'sendCsvReportEmail': {
-              const wf = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-              if (!wf) {
-                panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'No workspace open' });
-                break;
-              }
-              const csvPath = path.join(wf, 'deptrack-report.csv');
-              if (!fs.existsSync(csvPath)) {
-                panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'deptrack-report.csv not found' });
-                break;
-              }
-              const toCfg = vscode.workspace.getConfiguration('deptrack.email').get('to');
-              return sendEmailNotification(
-                'DepTrack CSV Report',
-                'Attached is the latest DepTrack CSV report.',
-                toCfg,
-                [{ filename: 'deptrack-report.csv', path: csvPath }]
-              );
-            }
+      case 'scanView':
+        return runView(m.view);
 
-            // Exports & chat
-            case 'exportCSV':
-              return exportCsv();
-            case 'exportPDF':
-              return exportPdf();
-    case 'chat': {
-              const text = m.text?.trim();
-              if (!text) {
-                panel.webview.postMessage({ command: 'chatResponse', text: 'Please enter a message.' });
-                break;
-              }
-              try {
-                const botText = await getFreeChatResponse(text);
-                panel.webview.postMessage({ command: 'chatResponse', text: botText });
-              } catch (err) {
-                console.error('Chat error:', err);
-                panel.webview.postMessage({ command: 'chatResponse', text: '😞 Something went wrong.' });
-              }
-              break;
-            }
-case 'applyDuplicationThreshold': {
-  const threshold = m.threshold;
-  extensionContext.workspaceState.update('dupThreshold', threshold);
-  runDuplicationScanWithThreshold(threshold);
+      case 'sendEmail': {
+        const cfg = vscode.workspace.getConfiguration('deptrack.email');
+        const to = m.email || cfg.get('to');
+        return sendEmailNotification(
+          'DepTrack Scan Results',
+          'Your dependency scan has completed. See your dashboard for details.',
+          to
+        );
+      }
+
+      case 'sendReportEmail': {
+        const wf = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!wf) {
+          panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'No workspace open' });
+          break;
+        }
+        const pdfPath = path.join(wf, 'deptrack-report.pdf');
+        if (!fs.existsSync(pdfPath)) {
+          panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'deptrack-report.pdf not found' });
+          break;
+        }
+        const toCfg = vscode.workspace.getConfiguration('deptrack.email').get('to');
+        return sendEmailNotification(
+          'DepTrack PDF Report',
+          'Attached is the latest DepTrack PDF report.',
+          toCfg,
+          [{ filename: 'deptrack-report.pdf', path: pdfPath }]
+        );
+      }
+
+      case 'sendCsvReportEmail': {
+        const wf = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!wf) {
+          panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'No workspace open' });
+          break;
+        }
+        const csvPath = path.join(wf, 'deptrack-report.csv');
+        if (!fs.existsSync(csvPath)) {
+          panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'deptrack-report.csv not found' });
+          break;
+        }
+        const toCfg = vscode.workspace.getConfiguration('deptrack.email').get('to');
+        return sendEmailNotification(
+          'DepTrack CSV Report',
+          'Attached is the latest DepTrack CSV report.',
+          toCfg,
+          [{ filename: 'deptrack-report.csv', path: csvPath }]
+        );
+      }
+
+      case 'exportCSV':
+        return exportCsv();
+
+      case 'exportPDF':
+        return exportPdf();
+
+  case 'updatePackage': {
+  const pkg = m.pkg;
+  if (!workspaceRoot) {
+    outputChannel.appendLine(`❌ Cannot update ${pkg}: no workspace open`);
+    break;
+  }
+  try {
+    const { stdout, stderr } = await execP(
+      `npm install ${pkg}@latest`,
+      { cwd: workspaceRoot }
+    );
+    outputChannel.appendLine(`✅ Updated ${pkg}:\n${stdout}`);
+    if (stderr) outputChannel.appendLine(stderr);
+
+    // <-- NEW: immediately re‐run the outdated scan
+    await withAbort('outdated', runOutdated);
+  } catch (err) {
+    const msg = err.stderr || err.message || err;
+    outputChannel.appendLine(`❌ Failed to update ${pkg}: ${msg}`);
+    panel.webview.postMessage({
+      command: 'updateFailed',
+      pkg,
+      error: msg
+    });
+  }
   break;
 }
 
 
-            // Individual refresh
-            case 'refreshOutdated':    return withAbort('outdated', runOutdated);
-            case 'refreshVuln':        return withAbort('vuln', runVuln);
-            case 'refreshLicense':     return withAbort('license', runLicenses);
-            case 'refreshEslint':      return withAbort('eslint', runESLint);
-            case 'refreshDuplication': return withAbort('duplication', runDuplication);
-            case 'refreshComplexity':  return withAbort('complexity', runComplexity);
-            case 'refreshSecret':      return withAbort('secret', runSecrets);
-            case 'refreshDepgraph':    return withAbort('depgraph', runDepGraph);
-            case 'refreshFixes':       return withAbort('fixes', runFixes);
-        case 'refreshSonar': {
-								return withAbort('sonar', runSonar);
-								const scope = message.scope || 'src';
-								return withAbort('sonar', (ws, signal) =>
-								 runSonar(ws, signal, scope)
-
-							 ); }
-            // Cancellation
-            case 'cancelAll':        abortControllers.all?.abort();    break;
-            case 'cancelOutdated':   abortControllers.outdated?.abort();break;
-            case 'cancelVuln':       abortControllers.vuln?.abort();   break;
-            case 'cancelLicense':    abortControllers.license?.abort();break;
-            case 'cancelEslint':     abortControllers.eslint?.abort(); break;
-            case 'cancelDuplication':abortControllers.duplication?.abort(); break;
-            case 'cancelComplexity': abortControllers.complexity?.abort();break;
-            case 'cancelSecret':     abortControllers.secret?.abort(); break;
-            case 'cancelDepgraph':   abortControllers.depgraph?.abort();break;
-            case 'cancelFixes':      abortControllers.fixes?.abort();  break;
-            case 'cancelSonar':      abortControllers.sonar?.abort();  break;
-
-            default:
-              outputChannel.appendLine(`Unknown command: ${m.command}`);
-          }
-        } catch (err) {
-          console.error('[DepTrack] handler error:', err);
-          panel.webview.postMessage({ command: 'emailStatus', success: false, error: err.message });
+      case 'chat': {
+        const text = m.text?.trim();
+        if (!text) {
+          panel.webview.postMessage({ command: 'chatResponse', text: 'Please enter a message.' });
+          break;
         }
-      });
+        try {
+          const botText = await getFreeChatResponse(text);
+          panel.webview.postMessage({ command: 'chatResponse', text: botText });
+        } catch (err) {
+          console.error('Chat error:', err);
+          panel.webview.postMessage({ command: 'chatResponse', text: '😞 Something went wrong.' });
+        }
+        break;
+      }
+
+      case 'applyDuplicationThreshold': {
+        const threshold = m.threshold;
+        extensionContext.workspaceState.update('dupThreshold', threshold);
+        runDuplicationScanWithThreshold(threshold);
+        break;
+      }
+
+      case 'refreshOutdated':
+        return withAbort('outdated', runOutdated);
+
+      case 'refreshVuln':
+        return withAbort('vuln', runVuln);
+
+      case 'refreshLicense':
+        return withAbort('license', runLicenses);
+
+      case 'refreshEslint':
+        return withAbort('eslint', runESLint);
+
+      case 'refreshDuplication':
+        return withAbort('duplication', runDuplication);
+
+      case 'refreshComplexity':
+        return withAbort('complexity', runComplexity);
+
+      case 'refreshSecret':
+        return withAbort('secret', runSecrets);
+
+      case 'refreshDepgraph':
+        return withAbort('depgraph', runDepGraph);
+
+      case 'refreshFixes':
+        return withAbort('fixes', runFixes);
+
+      case 'refreshSonar': {
+        const scope = m.scope || 'src';
+        return withAbort('sonar', (ws, signal) => runSonar(ws, signal, scope));
+      }
+
+      case 'cancelAll':
+        abortControllers.all?.abort();
+        break;
+
+      case 'cancelOutdated':
+        abortControllers.outdated?.abort();
+        break;
+
+      case 'cancelVuln':
+        abortControllers.vuln?.abort();
+        break;
+
+      case 'cancelLicense':
+        abortControllers.license?.abort();
+        break;
+
+      case 'cancelEslint':
+        abortControllers.eslint?.abort();
+        break;
+
+      case 'cancelDuplication':
+        abortControllers.duplication?.abort();
+        break;
+
+      case 'cancelComplexity':
+        abortControllers.complexity?.abort();
+        break;
+
+      case 'cancelSecret':
+        abortControllers.secret?.abort();
+        break;
+
+      case 'cancelDepgraph':
+        abortControllers.depgraph?.abort();
+        break;
+
+      case 'cancelFixes':
+        abortControllers.fixes?.abort();
+        break;
+
+      case 'cancelSonar':
+        abortControllers.sonar?.abort();
+        break;
+
+      default:
+        outputChannel.appendLine(`Unknown command: ${m.command}`);
+    }
+  } catch (err) {
+    console.error('[DepTrack] handler error:', err);
+    panel.webview.postMessage({ command: 'emailStatus', success: false, error: err.message });
+  }
+});
 
       panel.onDidDispose(() => {
         panel = null;
