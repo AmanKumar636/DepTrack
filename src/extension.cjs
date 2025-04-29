@@ -82,7 +82,11 @@ function resolveCmd(ws, tool) {
 
 const abortControllers = {};
 
+
+let extensionContext;
 async function activate(context) {
+ const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  extensionContext = context;
 
   // 1) Create and wrap your output channel for logging
   outputChannel = vscode.window.createOutputChannel('DepTrack');
@@ -125,119 +129,209 @@ async function activate(context) {
       panel.webview.postMessage({ command: 'chatResponse', text: '🔥 Test message!' });
 
       // Handle incoming messages
-      panel.webview.onDidReceiveMessage(async m => {
-        outputChannel.appendLine(`Received command: ${m.command}`);
-        try {
-          switch (m.command) {
-            // Bulk scans
-            case 'refresh':
-            case 'scanAll':
-              return withAbort('all', runAllChecks);
-            case 'scanView':
-              return runView(m.view);
+   panel.webview.onDidReceiveMessage(async m => {
+  outputChannel.appendLine(`Received command: ${m.command}`);
+  try {
+    switch (m.command) {
+      case 'refresh':
+      case 'scanAll':
+        return withAbort('all', runAllChecks);
 
-            // Send email notifications
-            case 'sendEmail': {
-              const cfg = vscode.workspace.getConfiguration('deptrack.email');
-              const to = m.email || cfg.get('to');
-              return sendEmailNotification(
-                'DepTrack Scan Results',
-                'Your dependency scan has completed. See your dashboard for details.',
-                to
-              );
-            }
-            case 'sendReportEmail': {
-              const wf = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-              if (!wf) {
-                panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'No workspace open' });
-                break;
-              }
-              const pdfPath = path.join(wf, 'deptrack-report.pdf');
-              if (!fs.existsSync(pdfPath)) {
-                panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'deptrack-report.pdf not found' });
-                break;
-              }
-              const toCfg = vscode.workspace.getConfiguration('deptrack.email').get('to');
-              return sendEmailNotification(
-                'DepTrack PDF Report',
-                'Attached is the latest DepTrack PDF report.',
-                toCfg,
-                [{ filename: 'deptrack-report.pdf', path: pdfPath }]
-              );
-            }
-            case 'sendCsvReportEmail': {
-              const wf = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-              if (!wf) {
-                panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'No workspace open' });
-                break;
-              }
-              const csvPath = path.join(wf, 'deptrack-report.csv');
-              if (!fs.existsSync(csvPath)) {
-                panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'deptrack-report.csv not found' });
-                break;
-              }
-              const toCfg = vscode.workspace.getConfiguration('deptrack.email').get('to');
-              return sendEmailNotification(
-                'DepTrack CSV Report',
-                'Attached is the latest DepTrack CSV report.',
-                toCfg,
-                [{ filename: 'deptrack-report.csv', path: csvPath }]
-              );
-            }
+      case 'scanView':
+        return runView(m.view);
 
-            // Exports & chat
-            case 'exportCSV':
-              return exportCsv();
-            case 'exportPDF':
-              return exportPdf();
-    case 'chat': {
-              const text = m.text?.trim();
-              if (!text) {
-                panel.webview.postMessage({ command: 'chatResponse', text: 'Please enter a message.' });
-                break;
-              }
-              try {
-                const botText = await getFreeChatResponse(text);
-                panel.webview.postMessage({ command: 'chatResponse', text: botText });
-              } catch (err) {
-                console.error('Chat error:', err);
-                panel.webview.postMessage({ command: 'chatResponse', text: '😞 Something went wrong.' });
-              }
-              break;
-            }
-            // Individual refresh
-            case 'refreshOutdated':    return withAbort('outdated', runOutdated);
-            case 'refreshVuln':        return withAbort('vuln', runVuln);
-            case 'refreshLicense':     return withAbort('license', runLicenses);
-            case 'refreshEslint':      return withAbort('eslint', runESLint);
-            case 'refreshDuplication': return withAbort('duplication', runDuplication);
-            case 'refreshComplexity':  return withAbort('complexity', runComplexity);
-            case 'refreshSecret':      return withAbort('secret', runSecrets);
-            case 'refreshDepgraph':    return withAbort('depgraph', runDepGraph);
-            case 'refreshFixes':       return withAbort('fixes', runFixes);
-            case 'refreshSonar':       return withAbort('sonar', runSonar);
+      case 'sendEmail': {
+        const cfg = vscode.workspace.getConfiguration('deptrack.email');
+        const to = m.email || cfg.get('to');
+        return sendEmailNotification(
+          'DepTrack Scan Results',
+          'Your dependency scan has completed. See your dashboard for details.',
+          to
+        );
+      }
 
-            // Cancellation
-            case 'cancelAll':        abortControllers.all?.abort();    break;
-            case 'cancelOutdated':   abortControllers.outdated?.abort();break;
-            case 'cancelVuln':       abortControllers.vuln?.abort();   break;
-            case 'cancelLicense':    abortControllers.license?.abort();break;
-            case 'cancelEslint':     abortControllers.eslint?.abort(); break;
-            case 'cancelDuplication':abortControllers.duplication?.abort(); break;
-            case 'cancelComplexity': abortControllers.complexity?.abort();break;
-            case 'cancelSecret':     abortControllers.secret?.abort(); break;
-            case 'cancelDepgraph':   abortControllers.depgraph?.abort();break;
-            case 'cancelFixes':      abortControllers.fixes?.abort();  break;
-            case 'cancelSonar':      abortControllers.sonar?.abort();  break;
-
-            default:
-              outputChannel.appendLine(`Unknown command: ${m.command}`);
-          }
-        } catch (err) {
-          console.error('[DepTrack] handler error:', err);
-          panel.webview.postMessage({ command: 'emailStatus', success: false, error: err.message });
+      case 'sendReportEmail': {
+        const wf = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!wf) {
+          panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'No workspace open' });
+          break;
         }
-      });
+        const pdfPath = path.join(wf, 'deptrack-report.pdf');
+        if (!fs.existsSync(pdfPath)) {
+          panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'deptrack-report.pdf not found' });
+          break;
+        }
+        const toCfg = vscode.workspace.getConfiguration('deptrack.email').get('to');
+        return sendEmailNotification(
+          'DepTrack PDF Report',
+          'Attached is the latest DepTrack PDF report.',
+          toCfg,
+          [{ filename: 'deptrack-report.pdf', path: pdfPath }]
+        );
+      }
+
+      case 'sendCsvReportEmail': {
+        const wf = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!wf) {
+          panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'No workspace open' });
+          break;
+        }
+        const csvPath = path.join(wf, 'deptrack-report.csv');
+        if (!fs.existsSync(csvPath)) {
+          panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'deptrack-report.csv not found' });
+          break;
+        }
+        const toCfg = vscode.workspace.getConfiguration('deptrack.email').get('to');
+        return sendEmailNotification(
+          'DepTrack CSV Report',
+          'Attached is the latest DepTrack CSV report.',
+          toCfg,
+          [{ filename: 'deptrack-report.csv', path: csvPath }]
+        );
+      }
+
+      case 'exportCSV':
+        return exportCsv();
+
+      case 'exportPDF':
+        return exportPdf();
+
+  case 'updatePackage': {
+  const pkg = m.pkg;
+  if (!workspaceRoot) {
+    outputChannel.appendLine(`❌ Cannot update ${pkg}: no workspace open`);
+    break;
+  }
+  try {
+    const { stdout, stderr } = await execP(
+      `npm install ${pkg}@latest`,
+      { cwd: workspaceRoot }
+    );
+    outputChannel.appendLine(`✅ Updated ${pkg}:\n${stdout}`);
+    if (stderr) outputChannel.appendLine(stderr);
+
+    // <-- NEW: immediately re‐run the outdated scan
+    await withAbort('outdated', runOutdated);
+  } catch (err) {
+    const msg = err.stderr || err.message || err;
+    outputChannel.appendLine(`❌ Failed to update ${pkg}: ${msg}`);
+    panel.webview.postMessage({
+      command: 'updateFailed',
+      pkg,
+      error: msg
+    });
+  }
+  break;
+}
+
+
+      case 'chat': {
+        const text = m.text?.trim();
+        if (!text) {
+          panel.webview.postMessage({ command: 'chatResponse', text: 'Please enter a message.' });
+          break;
+        }
+        try {
+          const botText = await getFreeChatResponse(text);
+          panel.webview.postMessage({ command: 'chatResponse', text: botText });
+        } catch (err) {
+          console.error('Chat error:', err);
+          panel.webview.postMessage({ command: 'chatResponse', text: '😞 Something went wrong.' });
+        }
+        break;
+      }
+
+      case 'applyDuplicationThreshold': {
+        const threshold = m.threshold;
+        extensionContext.workspaceState.update('dupThreshold', threshold);
+        runDuplicationScanWithThreshold(threshold);
+        break;
+      }
+
+      case 'refreshOutdated':
+        return withAbort('outdated', runOutdated);
+
+      case 'refreshVuln':
+        return withAbort('vuln', runVuln);
+
+      case 'refreshLicense':
+        return withAbort('license', runLicenses);
+
+      case 'refreshEslint':
+        return withAbort('eslint', runESLint);
+
+      case 'refreshDuplication':
+        return withAbort('duplication', runDuplication);
+
+      case 'refreshComplexity':
+        return withAbort('complexity', runComplexity);
+
+      case 'refreshSecret':
+        return withAbort('secret', runSecrets);
+
+      case 'refreshDepgraph':
+        return withAbort('depgraph', runDepGraph);
+
+      case 'refreshFixes':
+        return withAbort('fixes', runFixes);
+
+      case 'refreshSonar': {
+        const scope = m.scope || 'src';
+        return withAbort('sonar', (ws, signal) => runSonar(ws, signal, scope));
+      }
+
+      case 'cancelAll':
+        abortControllers.all?.abort();
+        break;
+
+      case 'cancelOutdated':
+        abortControllers.outdated?.abort();
+        break;
+
+      case 'cancelVuln':
+        abortControllers.vuln?.abort();
+        break;
+
+      case 'cancelLicense':
+        abortControllers.license?.abort();
+        break;
+
+      case 'cancelEslint':
+        abortControllers.eslint?.abort();
+        break;
+
+      case 'cancelDuplication':
+        abortControllers.duplication?.abort();
+        break;
+
+      case 'cancelComplexity':
+        abortControllers.complexity?.abort();
+        break;
+
+      case 'cancelSecret':
+        abortControllers.secret?.abort();
+        break;
+
+      case 'cancelDepgraph':
+        abortControllers.depgraph?.abort();
+        break;
+
+      case 'cancelFixes':
+        abortControllers.fixes?.abort();
+        break;
+
+      case 'cancelSonar':
+        abortControllers.sonar?.abort();
+        break;
+
+      default:
+        outputChannel.appendLine(`Unknown command: ${m.command}`);
+    }
+  } catch (err) {
+    console.error('[DepTrack] handler error:', err);
+    panel.webview.postMessage({ command: 'emailStatus', success: false, error: err.message });
+  }
+});
 
       panel.onDidDispose(() => {
         panel = null;
@@ -553,7 +647,7 @@ async function runESLint(signal) {
 
 
 
-async function runSonar(signal) {
+async function runSonar(signal, scope = 'src') {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) {
     vscode.window.showErrorMessage('Open a workspace first');
@@ -565,8 +659,10 @@ async function runSonar(signal) {
     return;
   }
   outputChannel.appendLine('runSonar start');
+  outputChannel.appendLine(`[runSonar] using scope: ${scope}`);
+
   try {
-    const sonarResult = await checkSonar(ws, signal);
+   const sonarResult = await checkSonar(ws, signal, scope);
     if (signal.aborted) {
       outputChannel.appendLine('runSonar: aborted before UI update');
       return;
@@ -624,7 +720,7 @@ async function runComplexity(signal) {
   outputChannel.appendLine('runComplexity done');
 }
 
-async function runDuplication(signal) {
+ async function runDuplication(signal) {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) {
     vscode.window.showErrorMessage('Open a workspace first');
@@ -636,8 +732,10 @@ async function runDuplication(signal) {
     return;
   }
   outputChannel.appendLine('runDuplication start');
+  const threshold = extensionContext.workspaceState.get('dupThreshold', 3);
+  
   try {
-    const duplicationDetails = await checkDuplication(ws, signal);
+    const duplicationDetails = await checkDuplication(ws, signal, threshold);
     if (signal.aborted) {
       outputChannel.appendLine('runDuplication: aborted before UI update');
       return;
@@ -656,6 +754,17 @@ async function runDuplication(signal) {
   
   }
   outputChannel.appendLine('runDuplication done');
+}
+
+function runDuplicationScanWithThreshold(threshold) {
+  // persist it
+  extensionContext.workspaceState.update('dupThreshold', threshold);
+
+  // now wrap correctly so withAbort passes us just `signal`
+  return withAbort('duplication', signal => {
+    const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    return checkDuplication(ws, signal, threshold);
+  });
 }
 
 async function runSecrets(signal) {
@@ -1075,87 +1184,104 @@ async function checkESLint(ws, signal) {
   return res;
 }
 
-async function checkSonar(ws, signal) {
-  if (signal.aborted) return { passed: true, summary: 'Skipped', metrics: {} };
-  const lintBin = resolveCmd(ws, 'sonarlint');
-  const srcDir  = path.join(ws, 'src');
-  if (!lintBin || !fs.existsSync(srcDir)) {
-    outputChannel.appendLine('[SonarLint] skipped — SonarLint or src/ missing');
+async function checkSonar(ws, signal, scope = 'src') {
+  // 0) Early abort
+  if (signal?.aborted) {
     return { passed: true, summary: 'Skipped', metrics: {} };
   }
 
-  outputChannel.appendLine('[SonarLint] start');
-  let stdout = '';
+  // 1) Read config & env vars
+  const cfg = vscode.workspace.getConfiguration();
+  const token      = cfg.get('deptrack.sonar.token')?.trim()      || process.env.SONAR_TOKEN?.trim();
+  const projectKey = cfg.get('deptrack.sonar.projectKey')?.trim() || process.env.SONAR_PROJECT_KEY?.trim();
+  const host       = (cfg.get('deptrack.sonar.hostUrl') ||
+                      process.env.SONAR_HOST_URL ||
+                      'https://sonarcloud.io').replace(/\/$/, '');
+
+  outputChannel.appendLine(
+    `[Sonar] token=${token?.slice(0,4) || '—'}… projectKey=${projectKey || '—'} host=${host}`
+  );
+  if (!token || !projectKey) {
+    outputChannel.appendLine(
+      `[Sonar] skipped — set deptrack.sonar.token & projectKey or export SONAR_TOKEN & SONAR_PROJECT_KEY`
+    );
+    return { passed: true, summary: 'Skipped', metrics: {} };
+  }
+
+  // 2) Locate sonar-scanner CLI
+  const scanner = resolveCmd(ws, 'sonar-scanner');
+  if (!scanner) {
+    outputChannel.appendLine('[Sonar] skipped — sonar-scanner not found');
+    return { passed: true, summary: 'Skipped', metrics: {} };
+  }
+
+  // 3) Build scanner properties
+  const props = [
+    `-Dsonar.token=${token}`,
+    `-Dsonar.projectKey=${projectKey}`,
+    `-Dsonar.host.url=${host}`,
+    '-Dsonar.qualitygate.wait=true',
+    '-Dsonar.scm.disabled=true',
+    `-Dsonar.sources=${scope}`,
+    `-Dsonar.exclusions=**/report/**,**/coverage/**,**/*.html,**/fixtures/**,**/.scannerwork/**,**/node_modules/**,**/dist/**`,
+    '-Dsonar.cpd.javascript.minimumTokens=50',
+    '-Dsonar.threads=4',
+    '-Dsonar.scanner.skipSystemTruststore=true'
+  ];
+
+  outputChannel.appendLine('[Sonar] start scan');
+  let passed = false;
+  let summary = '';
+
+  // 4) Execute scan and await quality gate
   try {
-    ({ stdout } = await execP(
-      `"${lintBin}" analyze --src "${srcDir}"`,
-      { cwd: ws, maxBuffer: 200 * 1024 * 1024, env: { ...process.env }, signal }
-    ));
-  } catch (e) {
-    stdout = e.stdout || '';
-  }
-  if (signal.aborted) return { passed: true, summary: 'Aborted', metrics: {} };
-
-  // 2) Parse only the “INFO: […]” lines
-  const issues = stdout
-    .split(/\r?\n/)
-    .filter(l => /^\s*INFO: \[/.test(l))
-    .map(l => {
-      const txt = l.replace(/^\s*INFO:\s*/, '');
-      const m = txt.match(/^\[([^\]]+)\]\s+(.+?):(\d+)(?::\d+)?\s+(\S+)\s*[-–]\s*(.*)$/);
-      return m && { severity: m[1].toUpperCase() };
-    })
-    .filter(Boolean);
-
-  // FIXED: remove the extra brace at the end of this line
-  const counts = issues.reduce((a, { severity }) => {
-    a[severity] = (a[severity] || 0) + 1;
-    return a;
-  }, {});
-
-  // 3) Run jscpd for duplication
-  let dupPct = '—';
-  if (!signal.aborted) {
-    try {
-      const { stdout: dupOut } = await execP(
-        'npx jscpd --silent --format json src',
-        { cwd: ws, env: { ...process.env }, maxBuffer: 200 * 1024 * 1024, signal }
-      );
-      const firstBrace = dupOut.indexOf('{');
-      const lastBrace  = dupOut.lastIndexOf('}');
-      if (firstBrace !== -1 && lastBrace !== -1) {
-        const dupReport = JSON.parse(dupOut.slice(firstBrace, lastBrace + 1));
-        dupPct = dupReport.statistics?.total?.percentage ?? '—';
-      } else {
-        outputChannel.appendLine('[SonarLint] jscpd: no JSON found');
-      }
-    } catch {
-      /* ignore */
-    }
+    await execP(`"${scanner}" ${props.join(' ')}`, {
+      cwd: ws,
+      maxBuffer: 200 * 1024 * 1024,
+      env: process.env,
+      signal
+    });
+    passed = true;
+    summary = '✅ Quality Gate passed';
+  } catch {
+    passed = false;
+    summary = '❌ Quality Gate failed';
   }
 
-  // 4) Determine pass/fail
-  const high = (counts.BLOCKER || 0) + (counts.CRITICAL || 0) + (counts.MAJOR || 0);
-  const passed = high === 0;
-  const summary = passed
-    ? '✅ No BLOCKER/CRITICAL/MAJOR issues'
-    : `❌ ${high} high-severity issue${high > 1 ? 's' : ''} found`;
+  // 5) Abort check
+  if (signal?.aborted) {
+    return { passed: true, summary: 'Aborted', metrics: {} };
+  }
 
-  outputChannel.appendLine(`[SonarLint] total issues: ${issues.length}`);
-  outputChannel.appendLine(`[SonarLint] ${summary}`);
-  outputChannel.appendLine('[SonarLint] done');
+  // 6) Fetch metrics from SonarCloud API
+  let metrics = {};
+  try {
+    const metricKeys = [
+      'bugs',
+      'vulnerabilities',
+      'code_smells',
+      'coverage',
+      'duplicated_lines_density'
+    ].join(',');
 
-  return {
-    passed,
-    summary,
-    metrics: {
-      bugs:                      counts.BLOCKER        || 0,
-      vulnerabilities:           counts.CRITICAL       || 0,
-      code_smells:               counts.MAJOR          || 0,
-      duplicated_lines_density:  dupPct
-    }
-  };
+    const url = `${host}/api/measures/component?component=${encodeURIComponent(projectKey)}&metricKeys=${metricKeys}`;
+    const resp = await axios.get(url, {
+      auth: { username: token, password: '' },
+      timeout: 10000
+    });
+    metrics = resp.data.component.measures.reduce((acc, m) => {
+      acc[m.metric] = m.value;
+      return acc;
+    }, {});
+  } catch (apiErr) {
+    console.error('[Sonar] API error:', apiErr);
+  }
+
+  outputChannel.appendLine(`[Sonar] done — ${summary}`);
+  return { passed, summary, metrics };
 }
+
+module.exports = { checkSonar };
 
 
 async function checkComplexity(ws, signal) {
@@ -1187,7 +1313,7 @@ async function checkComplexity(ws, signal) {
   return results;
 }
 
-async function checkDuplication(ws, signal) {
+async function checkDuplication(ws, signal, threshold = 3) {
   const fn = 'checkDuplication';
   if (signal.aborted) return [];
   outputChannel.appendLine('[Duplication] start');
@@ -1199,7 +1325,7 @@ async function checkDuplication(ws, signal) {
 
   let raw='';
   try {
-    const cmd = `${resolveCmd(ws,'jsinspect')||'npx jsinspect'} --identical --threshold 3 --reporter json ${files.map(f=>`"${f}"`).join(' ')}`;
+     const cmd = `${resolveCmd(ws,'jsinspect')||'npx jsinspect'} --identical --threshold ${threshold} --reporter json ${files.map(f=>`"${f}"`).join(' ')}`;
     const out = await execP(cmd,{cwd:ws,signal,maxBuffer:524288000});
     raw = (out.stdout||'').trim()||(out.stderr||'').trim();
   } catch(e){ if (!signal.aborted) raw=(e.stdout||'').trim()||(e.stderr||'').trim(); }

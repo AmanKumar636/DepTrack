@@ -53,6 +53,28 @@
     .card-refresh,.card-stop,.card-delete{background:none;border:none;cursor:pointer;font-size:1rem;color:var(--accent)}
     .spinner{display:none;margin-left:.5rem}.spin{display:inline-block;animation:spin 1s linear infinite}@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
     .card[data-view="sonar"]{flex:1 1 100%;min-width:auto}
+.card[data-view="duplication"] {
+  height: auto !important;
+}
+
+/* make content a column flexbox */
+.card[data-view="duplication"] .content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* keep the controls at natural height */
+#dupControls {
+  flex: 0 0 auto;
+}
+
+/* let the table take remaining space and scroll */
+#dupTableContainer {
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
     .card[data-view="fixes"],.card[data-view="chatbot"]{flex:0 0 100%;min-width:auto}
     table{width:100%;border-collapse:collapse}
     th,td{padding:.5rem;text-align:left;border-bottom:1px solid rgba(255,255,255,0.1)}
@@ -79,6 +101,41 @@
     .message.user{align-self:flex-end;background:var(--accent);color:#fff}
     .message.bot{align-self:flex-start;background:var(--panel-bg);color:var(--text-light)}
     .timestamp{font-size:.75rem;color:var(--text-muted);opacity:0.8}
+	.update-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background .2s, transform .2s;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  font-size: 0.9rem;
+}
+.update-btn:hover:not(:disabled) {
+  background: rgba(58,115,183,1);
+  transform: translateY(-2px);
+}
+.update-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.btn-spinner {
+  display: none;
+  font-size: 1rem;
+}
+.btn-spinner.spin {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
   </style>
 </head>
 <body id="vscode-app">
@@ -125,6 +182,7 @@
       </select>
       <button id="scanView">Show</button>
       <button id="scanAll">Show All</button>
+	 
     </div>
     <section id="cards">
       <div class="card" data-view="log">
@@ -146,7 +204,16 @@
             <span class="spinner">⏳</span>
           </div>
         </header>
-        <div class="content"><table id="outdatedTable"><thead><tr><th></th><th>Pkg</th><th>Curr</th><th>Latest</th></tr></thead><tbody></tbody></table></div>
+        <div class="content"><table id="outdatedTable"><thead>
+  <tr>
+    <th></th>
+    <th>Pkg</th>
+    <th>Curr</th>
+    <th>Latest</th>
+    <th>Action</th>
+  </tr>
+</thead>
+<tbody></tbody></table></div>
       </div>
       <div class="card" data-view="vuln">
         <header>
@@ -181,17 +248,50 @@
         </header>
         <div class="content"><table id="eslintTable"><thead><tr><th>File</th><th>Line</th><th>Rule</th><th>Msg</th></tr></thead><tbody></tbody></table></div>
       </div>
-      <div class="card" data-view="duplication">
-        <header>
-          Duplication
-          <div class="actions">
-            <button class="card-refresh" data-view="duplication">🔄</button>
-            <button class="card-stop" data-view="duplication">⏹️</button>
-            <span class="spinner">⏳</span>
-          </div>
-        </header>
-        <div class="content"><table id="dupTable"><thead><tr><th>A</th><th>La</th><th>B</th><th>Lb</th></tr></thead><tbody></tbody></table></div>
-      </div>
+     <div class="card" data-view="duplication">
+  <header>
+    Duplication
+    <div class="actions">
+      <button class="card-refresh" data-view="duplication">🔄</button>
+      <button class="card-stop"    data-view="duplication">⏹️</button>
+      <span class="spinner">⏳</span>
+    </div>
+  </header>
+  <div class="content">
+    <!-- Controls stay at natural height -->
+   <div id="dupControls" style="margin-bottom: 0.8rem; display: flex; align-items: center; justify-content: space-between; background: var(--card-bg-alt); padding: 0.5rem 0.75rem; border-radius: var(--radius); box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
+  <div style="display: flex; align-items: center; gap: 0.5rem;">
+    <label for="dupThreshold" style="font-weight: 500; color: var(--text-light); font-size: 0.95rem;">Threshold(token):</label>
+    <input
+      id="dupThreshold"
+      type="number"
+      min="1"
+      value="5"
+      style="width: 70px; padding: 0.3rem 0.4rem; font-size: 0.9rem; border-radius: 6px; border: 1px solid var(--accent); background: var(--card-bg); color: var(--text-light);"
+    />
+  </div>
+  <button
+    id="applyDupThreshold"
+    style="padding: 0.35rem 0.9rem; font-size: 0.9rem; border-radius: 6px; background: var(--accent); color: #fff; border: none; cursor: pointer; transition: background 0.3s;"
+    onmouseover="this.style.background='#0066cc';"
+    onmouseout="this.style.background='var(--accent)';"
+  >
+    Apply/Run
+  </button>
+</div>
+
+    <!-- Table container will fill remaining space and scroll -->
+    <div id="dupTableContainer">
+      <table id="dupTable">
+        <thead>
+          <tr><th>A</th><th>Line(A)</th><th>B</th><th>Line(B)</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
       <div class="card" data-view="complexity">
         <header>
           Complexity
@@ -237,14 +337,23 @@
         <div class="content"><table id="fixTable"><thead><tr><th>Package</th><th>Fix</th></tr></thead><tbody></tbody></table></div>
       </div>
       <div class="card" data-view="sonar">
-        <header>
-          Sonar Report
-          <div class="actions">
-            <button class="card-refresh" data-view="sonar">🔄</button>
-            <button class="card-stop" data-view="sonar">⏹️</button>
-            <span class="spinner">⏳</span>
-          </div>
-        </header>
+   <header style="display:flex;justify-content:space-between;align-items:center;">
+  <span>Sonar Report</span>
+  <div class="actions" style="display:flex;align-items:center;gap:0.5rem;">
+    <label for="sonarScope" style="color:var(--text-light);">Scope:</label>
+    <select
+      id="sonarScope"
+      style="padding:0.5rem;border-radius:var(--radius);border:none;background:var(--card-bg);color:var(--text-light);"
+    >
+      <option value="src">src/ only</option>
+      <option value=".">all files</option>
+    </select>
+    <button class="card-refresh" data-view="sonar">🔄</button>
+    <button class="card-stop"    data-view="sonar">⏹️</button>
+    <span class="spinner">⏳</span>
+  </div>
+</header>
+
         <div class="content"><pre id="sonarOutput"></pre><div id="sonarMetrics" class="metrics-container"></div></div>
       </div>
       <div class="card" data-view="chatbot">
@@ -348,6 +457,28 @@ document.getElementById('sendCsvBtn').addEventListener('click', () => {
   });
 });
 
+document.querySelector('.card-refresh[data-view="sonar"]').addEventListener('click', () => {
+    const scope = document.getElementById('sonarScope').value;
+    console.log(`Refreshing sonar (scope=${scope})`);
+    const sp = document.querySelector('.card[data-view="sonar"] .spinner');
+    sp.classList.add('spin');
+vscode.postMessage({ 
+  command: 'refreshSonar',
+  scope 
+});
+  });
+  
+  document.getElementById('applyDupThreshold').addEventListener('click', () => {
+  const threshold = parseInt(document.getElementById('dupThreshold').value, 10);
+  if (!isNaN(threshold) && threshold > 0) {
+    // 1) save it in extension.cjs
+    vscode.postMessage({ command: 'applyDuplicationThreshold', threshold });
+    console.log(`Applied duplication threshold: ${threshold}`);
+
+    // 2) immediately re-run the duplication scan
+    vscode.postMessage({ command: 'refreshDuplication' });
+  }
+});
 
 // Wire up every Stop button
   document.querySelectorAll('.card-stop').forEach(btn => {
@@ -371,6 +502,7 @@ document.getElementById('sendCsvBtn').addEventListener('click', () => {
     document.getElementById('clearChat').addEventListener('click',()=>{document.getElementById('chatContainer').innerHTML='';});
     document.getElementById('scanView').addEventListener('click',()=>{healthMode=false;const view=document.getElementById('viewSelect').value;container.style.flexWrap='nowrap';container.innerHTML='';const getCard=name=>allCards.find(c=>c.dataset.view===name);if(view==='chatbot'){const card=getCard('chatbot');card.style.flex='0 0 100%';container.appendChild(card);}else if(view==='fixes'){const fixes=getCard('fixes');const chat=getCard('chatbot');fixes.style.flex='0 0 50%';chat.style.flex='0 0 50%';container.appendChild(fixes);container.appendChild(chat);}else if(view==='sonar'){const card=getCard('sonar');card.style.flex='0 0 100%';container.appendChild(card);}else{const mainCard=getCard(view);const chatCard=getCard('chatbot');mainCard.style.flex='0 0 70%';chatCard.style.flex='0 0 30%';container.appendChild(mainCard);container.appendChild(chatCard);}});  
     document.getElementById('scanAll').addEventListener('click',()=>{healthMode=false;container.style.flexWrap='wrap';container.innerHTML='';allCards.filter(c=>!['sonar','chatbot','fixes'].includes(c.dataset.view)).forEach(c=>{c.style.flex='1 1 calc(33% - var(--gap))';container.appendChild(c);});const sonarCard=allCards.find(c=>c.dataset.view==='sonar');sonarCard.style.flex='0 0 100%';container.appendChild(sonarCard);['fixes','chatbot'].forEach(view=>{const card=allCards.find(c=>c.dataset.view===view);card.style.flex='0 0 100%';container.appendChild(card);});});  
+
 
 
 window.addEventListener('message', e => {
@@ -414,17 +546,41 @@ window.addEventListener('message', e => {
 
 
     // --- Outdated Packages ---
-    const outTb = document.querySelector('#outdatedTable tbody');
-    outTb.innerHTML = '';
-    Object.entries(d.outdated || {}).forEach(([pkg, info]) => {
-      const r = outTb.insertRow();
-      r.innerHTML = `
-        <td><span class="status ${info.status}"></span></td>
-        <td>${pkg}</td>
-        <td>${info.current}</td>
-        <td>${info.latest}</td>
-      `;
-    });
+  
+const outTb = document.querySelector('#outdatedTable tbody');
+outTb.innerHTML = '';
+Object.entries(d.outdated || {}).forEach(([pkg, info]) => {
+  const r = outTb.insertRow();
+  r.innerHTML = `
+    <td><span class="status ${info.status}"></span></td>
+    <td>${pkg}</td>
+    <td>${info.current}</td>
+    <td>${info.latest}</td>
+    <td>
+      <button class="update-btn" data-pkg="${pkg}">
+        <span class="btn-text">Update</span>
+        <span class="btn-spinner spinner">⏳</span>
+      </button>
+    </td>
+  `;
+});
+
+// after rendering rows, wire up all Update buttons:
+document.querySelectorAll('#outdatedTable .update-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const textEl    = btn.querySelector('.btn-text');
+    const spinnerEl = btn.querySelector('.btn-spinner');
+
+    // disable and show spinner
+    btn.disabled = true;
+    textEl.style.display = 'none';
+    spinnerEl.classList.add('spin');
+
+    // send to extension
+    const pkg = btn.dataset.pkg;
+    vscode.postMessage({ command: 'updatePackage', pkg });
+  });
+});
 
     // --- Vulnerabilities ---
     const vulTb = document.querySelector('#vulnTable tbody');
@@ -530,6 +686,7 @@ window.addEventListener('message', e => {
         <div class="card"><div class="card-title">🐞 Bugs</div><div class="card-value">${s.bugs               ?? 0}</div></div>
         <div class="card"><div class="card-title">🔒 Vulnerabilities</div><div class="card-value">${s.vulnerabilities    ?? 0}</div></div>
         <div class="card"><div class="card-title">🛠 Code Smells</div><div class="card-value">${s.code_smells        ?? 0}</div></div>
+		  <div class="card"><div class="card-title">🧪 Coverage</div><div class="card-value">${s.coverage       ?? '—'}</div></div>
         <div class="card"><div class="card-title">🔁 Duplication %</div><div class="card-value">${s.duplicated_lines_density ?? '—'}</div></div>
       `;
     } else {
@@ -558,7 +715,10 @@ window.addEventListener('message', e => {
   }
 });
 
+
     window.onload=()=>{document.getElementById('scanAll').click();};
+	
+
   </script>
 </body>
 </html>

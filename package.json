@@ -97,10 +97,10 @@
     }
   },
   "scripts": {
-     "build": "echo 'No build necessary'",
+    "build": "echo 'No build necessary'",
     "watch:build": "chokidar 'src/**/*' -c 'npm run build'",
     "lint": "eslint .",
-	"lint:sonar": "sonarlint --src 'src/**/*.js'",
+    "lint:sonar": "sonarlint --src src",
     "duplication": "jscpd src --reporters json --output report",
     "dup": "jscpd . --min-lines 1 --reporters console,json --output report/jscpd --ignore \"node_modules/**\" --ignore \"dist/**\" --ignore \"report/**\"",
     "test": "jest",
@@ -109,7 +109,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.0",
     "axios": "^1.6.7",
-    "chalk": "^2.4.2",
+    "chalk": "^5.4.1",
     "dotenv": "^16.5.0",
     "fast-glob": "^3.2.12",
     "glob": "^10.4.5",
@@ -117,7 +117,7 @@
     "node-fetch": "^2.7.0",
     "nodemailer": "^6.10.1",
     "openai": "^4.96.0",
-    "pdfkit": "^0.13.0",
+    "pdfkit": "^0.17.0",
     "semver": "^7.7.1",
     "snyk": "^1.1296.2",
     "sonar-scanner": "^3.1.0",
