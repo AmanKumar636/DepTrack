@@ -71,7 +71,7 @@ After installation, restart VS Code or run Developer: Reload Window.
 
 1. Open the Command Palette (⇧⌘P / Ctrl+Shift+P).
 2. Type DepTrack: to see available commands.
-3. Run DepTrack: Open Dashboard to bring up the DepTrack panel.
+3. Run DepTrack: DepTrack: Open Dashboard to bring up the DepTrack panel.
 4. Use the toolbar buttons to scan for:
 
   a.Outdated packages
