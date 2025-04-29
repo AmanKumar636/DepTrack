@@ -82,7 +82,10 @@ function resolveCmd(ws, tool) {
 
 const abortControllers = {};
 
+
+let extensionContext;
 async function activate(context) {
+  extensionContext = context;
 
   // 1) Create and wrap your output channel for logging
   outputChannel = vscode.window.createOutputChannel('DepTrack');
@@ -205,6 +208,14 @@ async function activate(context) {
               }
               break;
             }
+case 'applyDuplicationThreshold': {
+  const threshold = m.threshold;
+  extensionContext.workspaceState.update('dupThreshold', threshold);
+  runDuplicationScanWithThreshold(threshold);
+  break;
+}
+
+
             // Individual refresh
             case 'refreshOutdated':    return withAbort('outdated', runOutdated);
             case 'refreshVuln':        return withAbort('vuln', runVuln);
@@ -631,7 +642,7 @@ async function runComplexity(signal) {
   outputChannel.appendLine('runComplexity done');
 }
 
-async function runDuplication(signal) {
+ async function runDuplication(signal) {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) {
     vscode.window.showErrorMessage('Open a workspace first');
@@ -643,8 +654,10 @@ async function runDuplication(signal) {
     return;
   }
   outputChannel.appendLine('runDuplication start');
+  const threshold = extensionContext.workspaceState.get('dupThreshold', 3);
+  
   try {
-    const duplicationDetails = await checkDuplication(ws, signal);
+    const duplicationDetails = await checkDuplication(ws, signal, threshold);
     if (signal.aborted) {
       outputChannel.appendLine('runDuplication: aborted before UI update');
       return;
@@ -663,6 +676,17 @@ async function runDuplication(signal) {
   
   }
   outputChannel.appendLine('runDuplication done');
+}
+
+function runDuplicationScanWithThreshold(threshold) {
+  // persist it
+  extensionContext.workspaceState.update('dupThreshold', threshold);
+
+  // now wrap correctly so withAbort passes us just `signal`
+  return withAbort('duplication', signal => {
+    const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    return checkDuplication(ws, signal, threshold);
+  });
 }
 
 async function runSecrets(signal) {
@@ -1211,7 +1235,7 @@ async function checkComplexity(ws, signal) {
   return results;
 }
 
-async function checkDuplication(ws, signal) {
+async function checkDuplication(ws, signal, threshold = 3) {
   const fn = 'checkDuplication';
   if (signal.aborted) return [];
   outputChannel.appendLine('[Duplication] start');
@@ -1223,7 +1247,7 @@ async function checkDuplication(ws, signal) {
 
   let raw='';
   try {
-    const cmd = `${resolveCmd(ws,'jsinspect')||'npx jsinspect'} --identical --threshold 3 --reporter json ${files.map(f=>`"${f}"`).join(' ')}`;
+     const cmd = `${resolveCmd(ws,'jsinspect')||'npx jsinspect'} --identical --threshold ${threshold} --reporter json ${files.map(f=>`"${f}"`).join(' ')}`;
     const out = await execP(cmd,{cwd:ws,signal,maxBuffer:524288000});
     raw = (out.stdout||'').trim()||(out.stderr||'').trim();
   } catch(e){ if (!signal.aborted) raw=(e.stdout||'').trim()||(e.stderr||'').trim(); }
