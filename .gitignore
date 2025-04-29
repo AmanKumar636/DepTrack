@@ -23,3 +23,5 @@ snyk.exesecret.js
 "path/to/snyk.exe" 
 "C:/DepTrack/snyk.exe" 
 snyk.exe 
+".env"           
+".vscode/"       
