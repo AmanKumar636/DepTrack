@@ -101,6 +101,41 @@
     .message.user{align-self:flex-end;background:var(--accent);color:#fff}
     .message.bot{align-self:flex-start;background:var(--panel-bg);color:var(--text-light)}
     .timestamp{font-size:.75rem;color:var(--text-muted);opacity:0.8}
+	.update-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background .2s, transform .2s;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  font-size: 0.9rem;
+}
+.update-btn:hover:not(:disabled) {
+  background: rgba(58,115,183,1);
+  transform: translateY(-2px);
+}
+.update-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.btn-spinner {
+  display: none;
+  font-size: 1rem;
+}
+.btn-spinner.spin {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
   </style>
 </head>
 <body id="vscode-app">
@@ -169,7 +204,16 @@
             <span class="spinner">⏳</span>
           </div>
         </header>
-        <div class="content"><table id="outdatedTable"><thead><tr><th></th><th>Pkg</th><th>Curr</th><th>Latest</th></tr></thead><tbody></tbody></table></div>
+        <div class="content"><table id="outdatedTable"><thead>
+  <tr>
+    <th></th>
+    <th>Pkg</th>
+    <th>Curr</th>
+    <th>Latest</th>
+    <th>Action</th>
+  </tr>
+</thead>
+<tbody></tbody></table></div>
       </div>
       <div class="card" data-view="vuln">
         <header>
@@ -502,17 +546,41 @@ window.addEventListener('message', e => {
 
 
     // --- Outdated Packages ---
-    const outTb = document.querySelector('#outdatedTable tbody');
-    outTb.innerHTML = '';
-    Object.entries(d.outdated || {}).forEach(([pkg, info]) => {
-      const r = outTb.insertRow();
-      r.innerHTML = `
-        <td><span class="status ${info.status}"></span></td>
-        <td>${pkg}</td>
-        <td>${info.current}</td>
-        <td>${info.latest}</td>
-      `;
-    });
+  
+const outTb = document.querySelector('#outdatedTable tbody');
+outTb.innerHTML = '';
+Object.entries(d.outdated || {}).forEach(([pkg, info]) => {
+  const r = outTb.insertRow();
+  r.innerHTML = `
+    <td><span class="status ${info.status}"></span></td>
+    <td>${pkg}</td>
+    <td>${info.current}</td>
+    <td>${info.latest}</td>
+    <td>
+      <button class="update-btn" data-pkg="${pkg}">
+        <span class="btn-text">Update</span>
+        <span class="btn-spinner spinner">⏳</span>
+      </button>
+    </td>
+  `;
+});
+
+// after rendering rows, wire up all Update buttons:
+document.querySelectorAll('#outdatedTable .update-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const textEl    = btn.querySelector('.btn-text');
+    const spinnerEl = btn.querySelector('.btn-spinner');
+
+    // disable and show spinner
+    btn.disabled = true;
+    textEl.style.display = 'none';
+    spinnerEl.classList.add('spin');
+
+    // send to extension
+    const pkg = btn.dataset.pkg;
+    vscode.postMessage({ command: 'updatePackage', pkg });
+  });
+});
 
     // --- Vulnerabilities ---
     const vulTb = document.querySelector('#vulnTable tbody');
