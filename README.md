@@ -6,7 +6,7 @@ DepTrack is a lightweight Visual Studio Code extension that helps you keep your 
 
 ---
 
-**Version:** 0.0.5  
+**Version:** 0.0.1  
 **Publisher:** AmanKumar  
 **Display Name:** DepTrack  
 **Description:** Dependency & Security Tracker for Visual Studio Code
@@ -49,12 +49,12 @@ DepTrack is a lightweight Visual Studio Code extension that helps you keep your 
 
 ### 1. Install from VSIX (Recommended)
 
-1. Download `deptrack-0.0.5.vsix` to your local machine.  
+1. Download `deptrack.vsix` to your local machine.  
 2. Open **Visual Studio Code**.  
 3. Go to **Extensions** sidebar (⇧⌘X / Ctrl+Shift+X).  
 4. Click the ⋯ menu in the top-right corner of the Extensions view.  
 5. Choose **Install from VSIX…**  
-6. Browse to and select your downloaded `deptrack-0.0.5.vsix`.  
+6. Browse to and select your downloaded `deptrack.vsix`.  
 7. After installation, click **Reload** when prompted.
 
 ### 2. Install via Command-Line
@@ -64,6 +64,8 @@ code --install-extension path/to/deptrack-0.0.4.vsix
 ```
 Replace the path with wherever you saved the file.
 After installation, restart VS Code or run Developer: Reload Window.
+
+---
 
 ## Usage
 
@@ -84,7 +86,7 @@ After installation, restart VS Code or run Developer: Reload Window.
   j.Suggested fixes
   k.Chatbot assistance
 
-
+===
   
 ## Key Features
 
@@ -122,6 +124,7 @@ After installation, restart VS Code or run Developer: Reload Window.
 - **AI-Powered Chatbot**  
   Ask questions, get suggestions or guidance about your code and dependencies using built-in AI assistance.
 
+===
 
 ## Configuration
 
@@ -136,6 +139,7 @@ You can configure DepTrack settings in your VS Code Settings (settings.json):
   "deptrack.snykOrg": "<your-snyk-organization-id>"
 }
 ```
+---
 
 ## Development & Building from Source
 If you wish to modify or rebuild DepTrack:
@@ -157,24 +161,26 @@ npm install
 
    Run this one-line command to put all required CLIs on your PATH:
    
-   ```bash
+    ```bash
    npm install -g vsce snyk eslint jscpd jsinspect plato chokidar-cli jest license-checker sonar-scanner 
-   ```
+    ```
 
 ### 4.Build/Bundle
-DepTrack is distributed as CommonJS; no transpilation is required.
+  DepTrack is distributed as CommonJS; no transpilation is required.
 
-```bash
-npm run build
-```
+  ```bash
+  npm run build  
+  ```
 
 ### 5.Run Extension in VS Code
 
   a.Open this folder in VS Code.
   b.Press F5 to launch the extension in a new Extension Development Host window.
 
+---
 
 ## Troubleshooting
+
 ### 1.Extension failed to activate
 
   Verify your VS Code version is ≥ 1.88.0.
@@ -189,6 +195,8 @@ npm run build
 
   Ensure deptrack.snykOrg is correctly set in settings.
 
+===
+
 ## Tip:
 
 You can also run:
@@ -200,6 +208,7 @@ to remove the extension.
 
 If you’re developing locally, open your extension folder in VS Code and press F5 to launch a Development Host with your latest changes.
 
+---
 
 ## License
 
