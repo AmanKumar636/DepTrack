@@ -1146,7 +1146,7 @@ async function checkOutdated(ws, signal) {
   let raw = '';
   try {
     const { stdout } = await execP(
-      `"${npm}" outdated --json`,
+      `${npm} outdated --json`,
       { cwd: ws, signal, maxBuffer: 52428800 }
     );
     raw = stdout.trim();
