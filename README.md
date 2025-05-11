@@ -164,13 +164,13 @@ npm install
 
    Run below command to put all required CLIs on your PATH:
    
-    ```bash
+  ```bash
    npm install -g vsce snyk eslint jscpd jsinspect plato chokidar-cli jest license-checker sonar-scanner 
-     ```
-
-    ```bash
-    npm install --save-dev eslint@^8 eslint-config-airbnb-base eslint-plugin-import @typescript-eslint/parser @typescript-eslint/eslint-plugin eslint-plugin-security eslint-plugin-compat eslint-plugin-fp eslint-plugin-node eslint-plugin-promise eslint-plugin-prettier eslint-config-prettier eslint-plugin-react
-    ```
+  ```
+    
+```bash
+npm install --save-dev eslint@^8 eslint-config-airbnb-base eslint-plugin-import @typescript-eslint/parser @typescript-eslint/eslint-plugin eslint-plugin-security eslint-plugin-compat eslint-plugin-fp eslint-plugin-node eslint-plugin-promise eslint-plugin-prettier eslint-config-prettier eslint-plugin-react
+```
 
 ### 4.Build/Bundle
   DepTrack is distributed as CommonJS; no transpilation is required.
