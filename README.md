@@ -86,6 +86,7 @@ After installation, restart VS Code or run Developer: Reload Window.
   j.Suggested fixes
   k.Industry Standard Code
   l.Chatbot Assistance
+
 ===
   
 ## Key Features
