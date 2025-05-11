@@ -19,7 +19,6 @@ const { Linter } = require("eslint");
 // defaults to “all files”:
 let latestEslintScope = 'src';
 
-
 const HF_HUB_TOKEN = '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';
 
 if (!HF_HUB_TOKEN) {
@@ -27,6 +26,7 @@ if (!HF_HUB_TOKEN) {
 }
 const HF_MODEL      = 'microsoft/DialoGPT-medium';
 const HF_URL        = `https://api-inference.huggingface.co/models/${HF_MODEL}`;
+
 // keep the user’s last selection for the industry-standard check
 let latestEslintIndustryScope = '.';
 
@@ -1226,11 +1226,21 @@ async function checkVuln(ws, signal) {
   if (payload && typeof payload === 'object') {
     const list = Array.isArray(payload.vulnerabilities) ? payload.vulnerabilities : Object.values(payload.vulnerabilities||{});
     outputChannel.appendLine(`[Vuln] total vulnerabilities: ${list.length}`);
-    for (const v of list) {
+   const seen = new Set();	
+   for (const v of list) {
       if (signal.aborted) break;
       const pkgName = v.packageName||v.name||v.module_name;
       const severity= (v.severity||v.cvssScore||'unknown').toString().toLowerCase();
       const title   = v.title||v.overview||'';
+	  
+	   // build a unique identifier for this finding
+      const id = `${pkgName}::${severity}::${title}`;
+      if (seen.has(id)) {
+        // skip duplicates
+        continue;
+      }
+     seen.add(id);
+
       (res[pkgName] ||=[]).push({ severity, title });
     }
   } else if (vulnError) {
