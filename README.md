@@ -74,17 +74,18 @@ After installation, restart VS Code or run Developer: Reload Window.
 3. Run DepTrack: DepTrack: Open Dashboard to bring up the DepTrack panel.
 4. Use the toolbar buttons to scan for:
 
-  a.Outdated packages
+  a.Outdated Packages
   b.Vulnerabilities
-  c.License issues
-  d.ESLint issues
-  e.Code duplication
-  f.Cyclomatic complexity
+  c.License Issues
+  d.ESLint Issues
+  e.Code Duplication
+  f.Cyclomatic Complexity
   g.Secrets
-  h.Dependency graph
-  i.Sonar report
+  h.Dependency Graph
+  i.Sonar Report
   j.Suggested fixes
-  k.Chatbot assistance
+  k.Industry Standard Code
+  l.Chatbot Assistance
 
 ===
   
