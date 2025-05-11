@@ -43,6 +43,16 @@ DepTrack is a lightweight Visual Studio Code extension that helps you keep your 
 - **.VSIX package** for DepTrack (e.g. `deptrack-0.0.4.vsix`)  
 - **Node.js** v16.0.0 or later and **npm** v8.0.0 or later (only required if building from source)  
 
+- The following CLI tools installed globally (required for full functionality):
+```bash
+   npm install -g snyk eslint jscpd jsinspect plato chokidar-cli jest license-checker sonar-scanner
+```
+
+```bash
+export SNYK_TOKEN="a6f20f51-3dc5-4112-a309-2623229b3e2f"
+snyk config set org=amankmr417310
+```
+
 ---
 
 ## Installation
@@ -111,7 +121,7 @@ After installation, restart VS Code or run Developer: Reload Window.
 - **Secrets Detection**  
   Scans for accidentally committed API keys, passwords, and other secrets.
 
-- **Industry Standard Code** <br>
+- **Standards Conformance** <br>
   Check your code if it follows industry standards.
   
 - **Dependency Graph**  
@@ -138,9 +148,27 @@ You can configure DepTrack settings in your VS Code Settings (settings.json):
   "deptrack.email.auth.user": "<your-email@example.com>",
   "deptrack.email.auth.pass": "<your-email-password-or-app-token>",
   "deptrack.email.to": "<recipient@example.com>",
-  "deptrack.snykOrg": "<your-snyk-organization-id>"
+  "deptrack.snykOrg": "<your-snyk-organization-id>",
+  "deptrack.snykOrg": "amankmr417310"
 }
 ```
+
+# (Optional) Use Preconfigured Snyk Token
+
+To use the built-in Snyk scanning feature without setting up your own Snyk account, you can optionally export a predefined token:
+
+```bash
+export SNYK_TOKEN="a6f20f51-3dc5-4112-a309-2623229b3e2f"
+```
+
+> ⚠️ Warning: This token belongs to the extension publisher and usage is monitored. Abuse or misuse will result in revocation.
+
+If you prefer to use your own Snyk account, simply run:
+
+```bash
+snyk auth
+```
+
 ---
 
 ## Development & Building from Source
