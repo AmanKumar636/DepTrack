@@ -90,6 +90,11 @@
     .metrics-container .card-title{font-size:1rem;margin-bottom:0.5rem}
     .metrics-container .card-value{font-size:1.25rem;font-weight:bold}
     .card[data-view="chatbot"] .content{display:flex;flex-direction:column;height:100%}
+	/* Show (single-column) mode: make cards full-height */
+#cards.no-wrap .card {
+  height: 100%;
+}
+
     #chatContainer{flex:1;overflow-y:auto;padding-bottom:var(--gap);display:flex;flex-direction:column;gap:0.25rem}
     .chat-input-row{display:flex;gap:0.5rem;margin-top:0.5rem}
     .chat-input-row input{flex:1;border:none;border-radius:var(--radius);padding:0.5rem;background:var(--card-bg);color:var(--text-light)}
@@ -349,7 +354,7 @@
         <div class="content"><table id="fixTable"><thead><tr><th>Package</th><th>Fix</th></tr></thead><tbody></tbody></table></div>
       </div>
 	  
-      <div class="card" data-view="sonar">
+   <div class="card" data-view="sonar">
    <header style="display:flex;justify-content:space-between;align-items:center;">
   <span>Quality Report</span>
   <div class="actions" style="display:flex;align-items:center;gap:0.5rem;">
@@ -505,15 +510,19 @@ document
   });
 
 
-document.querySelector('.card-refresh[data-view="sonar"]').addEventListener('click', () => {
-    const scope = document.getElementById('sonarScope').value;
-    console.log(`Refreshing sonar (scope=${scope})`);
+document
+  .querySelector('.card-refresh[data-view="sonar"]')
+  .addEventListener('click', () => {
+    console.log('Refreshing sonar');
+    
+    // guard the spinner
     const sp = document.querySelector('.card[data-view="sonar"] .spinner');
-    sp.classList.add('spin');
-vscode.postMessage({ 
-  command: 'refreshSonar',
-  scope 
-});
+    if (sp) sp.classList.add('spin');
+    
+    // just fire the command (no scope)
+    vscode.postMessage({
+      command: 'refreshSonar'
+    });
   });
   
 // ESLint override (scoped handler must come *after* the generic binding)
@@ -562,13 +571,78 @@ document.querySelector('.card-refresh[data-view="eslint"]')
   });
   
   
-    document.querySelectorAll('.card-delete').forEach(btn=>{btn.addEventListener('click',()=>{document.getElementById('logOutput').textContent='';document.getElementById('logStatus').className='status-dot';});});
+  document.querySelectorAll('.card-delete').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const out = document.getElementById('logOutput');
+    if (out) {
+      out.textContent = '';
+    }
+
+    const dot = document.getElementById('logStatus');
+    if (dot) {
+      dot.className = 'status-dot';
+    }
+  });
+});
 
     document.getElementById('sendChat').addEventListener('click',()=>{const t=document.getElementById('chatInput').value.trim();if(t){const time=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});appendMessage('user',t,time);document.getElementById('chatInput').value='';vscode.postMessage({command:'chat',text:t});}});
     document.getElementById('chatInput').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('sendChat').click();});
     document.getElementById('clearChat').addEventListener('click',()=>{document.getElementById('chatContainer').innerHTML='';});
-    document.getElementById('scanView').addEventListener('click',()=>{healthMode=false;const view=document.getElementById('viewSelect').value;container.style.flexWrap='nowrap';container.innerHTML='';const getCard=name=>allCards.find(c=>c.dataset.view===name);if(view==='chatbot'){const card=getCard('chatbot');card.style.flex='0 0 100%';container.appendChild(card);}else if(view==='fixes'){const fixes=getCard('fixes');const chat=getCard('chatbot');fixes.style.flex='0 0 50%';chat.style.flex='0 0 50%';container.appendChild(fixes);container.appendChild(chat);}else if(view==='sonar'){const card=getCard('sonar');card.style.flex='0 0 100%';container.appendChild(card);}else{const mainCard=getCard(view);const chatCard=getCard('chatbot');mainCard.style.flex='0 0 70%';chatCard.style.flex='0 0 30%';container.appendChild(mainCard);container.appendChild(chatCard);}});  
-    document.getElementById('scanAll').addEventListener('click',()=>{healthMode=false;container.style.flexWrap='wrap';container.innerHTML='';allCards.filter(c=>!['sonar','chatbot','fixes'].includes(c.dataset.view)).forEach(c=>{c.style.flex='1 1 calc(33% - var(--gap))';container.appendChild(c);});const sonarCard=allCards.find(c=>c.dataset.view==='sonar');sonarCard.style.flex='0 0 100%';container.appendChild(sonarCard);['fixes','chatbot'].forEach(view=>{const card=allCards.find(c=>c.dataset.view===view);card.style.flex='0 0 100%';container.appendChild(card);});});  
+  document.getElementById('scanView').addEventListener('click', () => {
+  healthMode = false;
+  container.classList.add('no-wrap'); // ADD THIS
+  const view = document.getElementById('viewSelect').value;
+  container.style.flexWrap = 'nowrap';
+  container.innerHTML = '';
+
+  const getCard = name => allCards.find(c => c.dataset.view === name);
+
+  if (view === 'chatbot') {
+    const card = getCard('chatbot');
+    card.style.flex = '0 0 100%';
+    container.appendChild(card);
+  } else if (view === 'fixes') {
+    const fixes = getCard('fixes');
+    const chat = getCard('chatbot');
+    fixes.style.flex = '0 0 50%';
+    chat.style.flex = '0 0 50%';
+    container.appendChild(fixes);
+    container.appendChild(chat);
+  } else if (view === 'sonar') {
+    const card = getCard('sonar');
+    card.style.flex = '0 0 100%';
+    container.appendChild(card);
+  } else {
+    const mainCard = getCard(view);
+    const chatCard = getCard('chatbot');
+    mainCard.style.flex = '0 0 70%';
+    chatCard.style.flex = '0 0 30%';
+    container.appendChild(mainCard);
+    container.appendChild(chatCard);
+  }
+});
+
+document.getElementById('scanAll').addEventListener('click', () => {
+  healthMode = false;
+  container.classList.remove('no-wrap'); // ADD THIS
+  container.style.flexWrap = 'wrap';
+  container.innerHTML = '';
+
+  allCards.filter(c => !['sonar', 'chatbot', 'fixes'].includes(c.dataset.view)).forEach(c => {
+    c.style.flex = '1 1 calc(33% - var(--gap))';
+    container.appendChild(c);
+  });
+
+  const sonarCard = allCards.find(c => c.dataset.view === 'sonar');
+  sonarCard.style.flex = '0 0 100%';
+  container.appendChild(sonarCard);
+
+  ['fixes', 'chatbot'].forEach(view => {
+    const card = allCards.find(c => c.dataset.view === view);
+    card.style.flex = '0 0 100%';
+    container.appendChild(card);
+  });
+});
 
 
 
@@ -582,36 +656,59 @@ window.addEventListener('message', e => {
     return;
   }
   
-//------------Industry Standards Code------------------------------------------
- const { command, payload } = e.data;
-  if (command === 'updateData' && payload.eslintIndustryDetails) {
-    const rows = payload.eslintIndustryDetails
-      .map(d => `<tr>
-                   <td>${d.file}</td>
-                   <td>${d.line}</td>
-                   <td>${d.rule}</td>
-                   <td>${d.message}</td>
-                 </tr>`)
-      .join('');
-    const tbody = document.querySelector('table[data-view="eslintIndustry"] tbody');
+ 
+ 
+
+// ─── Industry Standards Code ──────────────────────────────────────────────
+const { command, payload } = e.data;
+if (command === 'updateData' && payload.eslintIndustryDetails) {
+  // 1. Build the rows HTML
+  const rows = payload.eslintIndustryDetails
+    .map(d => `
+      <tr>
+        <td>${d.file}</td>
+        <td>${d.line}</td>
+        <td>${d.rule}</td>
+        <td>${d.message}</td>
+      </tr>`.trim()
+    )
+    .join('');
+
+  // 2. Find and update the <tbody>
+  const tbody = document.querySelector('table[data-view="eslintIndustry"] tbody');
+  if (tbody) {
     tbody.innerHTML = rows;
-    document.querySelector('.card[data-view="eslintIndustry"] .spinner')
-            .classList.remove('spin');
-			  }
-			  
-			  
-  // ─── Process log updates ──────────────────────────────────────────────────
-  if (m.command === 'logUpdate') {
-    const L = m.payload || [];
-    const dot = document.getElementById('logStatus');
-    const err = L.some(line => /\bERROR\b/i.test(line));
-    const wrn = !err && L.some(line => /\bWARN(?:ING)?\b/i.test(line));
-    dot.className = 'status-dot';
-    if (err) dot.classList.add('error');
-    else if (wrn) dot.classList.add('warning');
-    document.getElementById('logOutput').textContent = L.join('\n');
-    return;
+  } else {
+    console.warn('ESLint-Industry <tbody> not found – skipping update.');
   }
+
+  // 3. Remove the spinner
+  const spinner = document.querySelector('.card[data-view="eslintIndustry"] .spinner');
+  if (spinner) {
+    spinner.classList.remove('spin');
+  } else {
+    console.warn('ESLint-Industry spinner not found.');
+  }
+}
+			  
+			  
+// ─── Process log updates ──────────────────────────────────────────────────
+if (m.command === 'logUpdate') {
+  const L   = m.payload || [];
+  const dot = document.getElementById('logStatus');
+  if (!dot) return;                        // bail out if the status span isn’t there
+
+  const err = L.some(line => /\bERROR\b/i.test(line));
+  const wrn = !err && L.some(line => /\bWARN(?:ING)?\b/i.test(line));
+
+  dot.className = 'status-dot';
+  if (err)        dot.classList.add('error');
+  else if (wrn)   dot.classList.add('warning');
+
+  const out = document.getElementById('logOutput');
+  if (out) out.textContent = L.join('\n'); // similarly guard this if you clear it elsewhere
+  return;
+}
 
   // ─── Email send status ───────────────────────────────────────────────────
   if (m.command === 'emailStatus') {
