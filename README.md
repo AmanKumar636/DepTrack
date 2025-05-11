@@ -195,6 +195,11 @@ npm install
    npm install -g vsce snyk eslint jscpd jsinspect plato chokidar-cli jest license-checker sonar-scanner 
   ```
 
+```bash
+export SNYK_TOKEN="a6f20f51-3dc5-4112-a309-2623229b3e2f"
+snyk config set org=amankmr417310
+```
+
 ### 4.Build/Bundle
   DepTrack is distributed as CommonJS; no transpilation is required.
 
@@ -204,8 +209,8 @@ npm install
 
 ### 5.Run Extension in VS Code
 
-  a.Open this folder in VS Code.
-  b.Press F5 to launch the extension in a new Extension Development Host window.
+  - Open this folder in VS Code.
+  - Press F5 to launch the extension in a new Extension Development Host window.
 
 ---
 
@@ -225,7 +230,7 @@ npm install
 
   Ensure deptrack.snykOrg is correctly set in settings.
 
-===
+---
 
 ## Tip:
 
