@@ -121,6 +121,9 @@ After installation, restart VS Code or run Developer: Reload Window.
   • Export scan results as CSV or PDF  
   • Send email alerts or schedule PDF/CSV reports via SMTP  
 
+- **Industry Standard Code**
+- Check your code if it follow industry standards.
+
 - **AI-Powered Chatbot**  
   Ask questions, get suggestions or guidance about your code and dependencies using built-in AI assistance.
 
@@ -159,10 +162,14 @@ npm install
 
 ### 3. Install Global CLI Tools:
 
-   Run this one-line command to put all required CLIs on your PATH:
+   Run below command to put all required CLIs on your PATH:
    
     ```bash
    npm install -g vsce snyk eslint jscpd jsinspect plato chokidar-cli jest license-checker sonar-scanner 
+     ```
+
+    ```bash
+    npm install --save-dev eslint@^8 eslint-config-airbnb-base eslint-plugin-import @typescript-eslint/parser @typescript-eslint/eslint-plugin eslint-plugin-security eslint-plugin-compat eslint-plugin-fp eslint-plugin-node eslint-plugin-promise eslint-plugin-prettier eslint-config-prettier eslint-plugin-react
     ```
 
 ### 4.Build/Bundle
