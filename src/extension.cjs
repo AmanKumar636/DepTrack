@@ -481,9 +481,9 @@ async function runAllChecks(signal) {
   }
 
   // 5) Industry-grade ESLint
-  outputChannel.appendLine(`-> checkIndustryESLint (scope=${latestEslintScope})`);
+  outputChannel.appendLine(`-> runIndustryESLint (scope=${latestEslintScope})`);
   try {
-    eslintIndustryDetails = await checkIndustryESLint(ws, signal, latestEslintScope);
+   const eslintIndustryDetails = await runIndustryESLint(ws, signal, latestEslintScope);
   } catch (e) {
     logError('runAllChecks.checkIndustryESlint', e);
   }
@@ -1121,16 +1121,6 @@ function flattenDeps(tree, acc = {}) {
   }
   return acc;
 }
-
-
-
-
-
-
-
-
-
-
 
 
 
