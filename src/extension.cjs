@@ -14,22 +14,29 @@ const fg = require('fast-glob');
 require('dotenv').config()
 const { Configuration, OpenAIApi } = require('openai');
 const fetch = require('node-fetch');
+const { Linter } = require("eslint");
 
-const HF_HUB_TOKEN = process.env.HF_HUB_TOKEN;
+// defaults to “all files”:
+let latestEslintScope = 'src';
+
+
+const HF_HUB_TOKEN = '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';
+
 if (!HF_HUB_TOKEN) {
   console.warn('⚠️  HF_HUB_TOKEN is not set! Check your .env.');
 }
 const HF_MODEL      = 'microsoft/DialoGPT-medium';
 const HF_URL        = `https://api-inference.huggingface.co/models/${HF_MODEL}`;
+// keep the user’s last selection for the industry-standard check
+let latestEslintIndustryScope = '.';
 
 
+  
 const patterns = [
   { name: 'AWS Key',    regex: /AKIA[0-9A-Z]{16}/g },
   { name: 'Private Key', regex: /-----BEGIN PRIVATE KEY-----/g }
 ];
 const forbiddenLicenses = ['GPL','AGPL','LGPL','PROPRIETARY','UNKNOWN'];
-const OPENAI_KEY = 'OPENAI_API_KEY';
-const { OpenAI } = require('openai');
 
 
 
@@ -140,56 +147,59 @@ async function activate(context) {
       case 'scanView':
         return runView(m.view);
 
+
+      // ─── Send a plain “scan results” email ───────────────────────────────────
       case 'sendEmail': {
-        const cfg = vscode.workspace.getConfiguration('deptrack.email');
-        const to = m.email || cfg.get('to');
+        // If the user typed a custom “to:”, we’ll still honor it; otherwise
+        // sendEmailNotification will fall back to your hard-coded address.
+        const overrideTo = m.email;  
         return sendEmailNotification(
           'DepTrack Scan Results',
           'Your dependency scan has completed. See your dashboard for details.',
-          to
+          overrideTo
         );
       }
 
-      case 'sendReportEmail': {
-        const wf = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (!wf) {
-          panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'No workspace open' });
-          break;
-        }
-        const pdfPath = path.join(wf, 'deptrack-report.pdf');
-        if (!fs.existsSync(pdfPath)) {
-          panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'deptrack-report.pdf not found' });
-          break;
-        }
-        const toCfg = vscode.workspace.getConfiguration('deptrack.email').get('to');
-        return sendEmailNotification(
-          'DepTrack PDF Report',
-          'Attached is the latest DepTrack PDF report.',
-          toCfg,
-          [{ filename: 'deptrack-report.pdf', path: pdfPath }]
-        );
+      // ─── Send the PDF report as an attachment ────────────────────────────────
+  case 'sendReportEmail': {
+      const overrideTo = m.email;
+      const wf = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!wf) {
+        panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'No workspace open' });
+        break;
       }
-
-      case 'sendCsvReportEmail': {
-        const wf = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (!wf) {
-          panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'No workspace open' });
-          break;
-        }
-        const csvPath = path.join(wf, 'deptrack-report.csv');
-        if (!fs.existsSync(csvPath)) {
-          panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'deptrack-report.csv not found' });
-          break;
-        }
-        const toCfg = vscode.workspace.getConfiguration('deptrack.email').get('to');
-        return sendEmailNotification(
-          'DepTrack CSV Report',
-          'Attached is the latest DepTrack CSV report.',
-          toCfg,
-          [{ filename: 'deptrack-report.csv', path: csvPath }]
-        );
+      const pdfPath = path.join(wf, 'deptrack-report.pdf');
+      if (!fs.existsSync(pdfPath)) {
+        panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'PDF not found' });
+        break;
       }
+      return sendEmailNotification(
+        'DepTrack PDF Report',
+        'Attached is the latest DepTrack PDF report.',
+        overrideTo,
+        [{ filename: 'deptrack-report.pdf', path: pdfPath }]
+      );
+    }
 
+    case 'sendCsvReportEmail': {
+      const overrideTo = m.email;
+      const wf = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!wf) {
+        panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'No workspace open' });
+        break;
+      }
+      const csvPath = path.join(wf, 'deptrack-report.csv');
+      if (!fs.existsSync(csvPath)) {
+        panel.webview.postMessage({ command: 'emailStatus', success: false, error: 'CSV not found' });
+        break;
+      }
+      return sendEmailNotification(
+        'DepTrack CSV Report',
+        'Attached is the latest DepTrack CSV report.',
+        overrideTo,
+        [{ filename: 'deptrack-report.csv', path: csvPath }]
+      );
+    }	  
       case 'exportCSV':
         return exportCsv();
 
@@ -257,9 +267,37 @@ async function activate(context) {
       case 'refreshLicense':
         return withAbort('license', runLicenses);
 
-      case 'refreshEslint':
-        return withAbort('eslint', runESLint);
 
+      // ─── refreshEslint handler ───────────────────────────────────────────────────
+    case 'refreshEslint': {
+      // pull the scope from the dropdown (either 'src' or '.')
+       // remember the user’s latest choice
+    latestEslintScope = m.scope || '.';
+
+    const scope = latestEslintScope;
+      outputChannel.appendLine(`[refreshEslint] scope=${scope}`);
+
+      // delegate to runESLint, passing scope through
+      return withAbort('eslint', signal =>
+        runESLint(signal, scope)
+      );
+    }
+	
+	
+	   // ─── refreshEslintIndustry handler ────────────────────────────────────────────
+    case 'refreshEslintIndustry': {
+      // pull the scope from the dropdown (either 'src' or '.')
+      latestEslintIndustryScope = m.scope || '.';
+
+      const scope = latestEslintIndustryScope;
+      outputChannel.appendLine(`[refreshEslintIndustry] scope=${scope}`);
+
+      // delegate to runIndustryESLint, passing scope through
+      return withAbort('eslintIndustry', signal =>
+        runIndustryESLint(signal, scope)
+      );
+    }
+	
       case 'refreshDuplication':
         return withAbort('duplication', runDuplication);
 
@@ -275,10 +313,12 @@ async function activate(context) {
       case 'refreshFixes':
         return withAbort('fixes', runFixes);
 
-      case 'refreshSonar': {
-        const scope = m.scope || 'src';
-        return withAbort('sonar', (ws, signal) => runSonar(ws, signal, scope));
-      }
+case 'refreshSonar': {
+  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  return withAbort('sonar', (signal) => runSonar(ws, signal));
+}
+
+
 
       case 'cancelAll':
         abortControllers.all?.abort();
@@ -323,6 +363,8 @@ async function activate(context) {
       case 'cancelSonar':
         abortControllers.sonar?.abort();
         break;
+
+	
 
       default:
         outputChannel.appendLine(`Unknown command: ${m.command}`);
@@ -373,13 +415,17 @@ function deactivate() {
 }
 
 
+// WARNING: Hard-coding secrets in source is insecure! 
+// Anyone with access to your repo can see and misuse this token.
+
+
 async function getFreeChatResponse(prompt) {
   console.log('🕵️ Sending to HF API:', prompt);
   const res = await fetch(HF_URL, {
     method:  'POST',
     headers: {
-      'Authorization': `Bearer ${HF_HUB_TOKEN}`,
-      'Content-Type':  'application/json'
+      Authorization: `Bearer ${HF_HUB_TOKEN}`,
+      'Content-Type': 'application/json'
     },
     body: JSON.stringify({ inputs: prompt }),
   });
@@ -387,16 +433,14 @@ async function getFreeChatResponse(prompt) {
   const json = await res.json();
   return Array.isArray(json) && json[0]?.generated_text
     ? json[0].generated_text
-    : 'Sorry, I didn\'t get that.';
+    : "Sorry, I didn't get that.";
 }
 
 
-async function runAllChecks() {
-  
+async function runAllChecks(signal) {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) {
     vscode.window.showErrorMessage('Open a workspace first');
-    
     return;
   }
 
@@ -404,66 +448,82 @@ async function runAllChecks() {
   outputChannel.show(true);
   outputChannel.appendLine('runAllChecks start');
 
-
+  // 1) Outdated packages
   outputChannel.appendLine('-> checkOutdated');
   try {
-    outdated = await checkOutdated(ws);
+    outdated = await checkOutdated(ws, signal);
   } catch (e) {
     logError('runAllChecks.checkOutdated', e);
   }
 
+  // 2) Vulnerabilities
   outputChannel.appendLine('-> checkVuln');
   try {
-    vulnPayload = await checkVuln(ws);
+    vulnPayload = await checkVuln(ws, signal);
   } catch (e) {
     logError('runAllChecks.checkVuln', e);
   }
 
+  // 3) License issues
   outputChannel.appendLine('-> checkLicenses');
   try {
-    licenseIssues = await checkLicenses(ws);
+    licenseIssues = await checkLicenses(ws, signal);
   } catch (e) {
     logError('runAllChecks.checkLicenses', e);
   }
 
-  outputChannel.appendLine('-> checkESLint');
+  // 4) Generic ESLint
+  outputChannel.appendLine(`-> checkESLint (scope=${latestEslintScope})`);
   try {
-    eslintDetails = await checkESLint(ws);
+    eslintDetails = await checkESLint(ws, signal, latestEslintScope);
   } catch (e) {
     logError('runAllChecks.checkESLint', e);
   }
 
+  // 5) Industry-grade ESLint
+  outputChannel.appendLine(`-> checkIndustryESLint (scope=${latestEslintScope})`);
+  try {
+    eslintIndustryDetails = await checkIndustryESLint(ws, signal, latestEslintScope);
+  } catch (e) {
+    logError('runAllChecks.checkIndustryESlint', e);
+  }
+
+  // 6) Sonar
   outputChannel.appendLine('-> checkSonar');
   try {
-    sonarResult = await checkSonar(ws);
+    sonarResult = await checkSonar(ws, signal);
   } catch (e) {
     logError('runAllChecks.checkSonar', e);
   }
 
+  // 7) Complexity
   outputChannel.appendLine('-> checkComplexity');
   try {
-    complexity = await checkComplexity(ws);
+    complexity = await checkComplexity(ws, signal);
   } catch (e) {
     logError('runAllChecks.checkComplexity', e);
   }
 
+  // 8) Duplication
   outputChannel.appendLine('-> checkDuplication');
   try {
-    duplicationDetails = await checkDuplication(ws);
+    duplicationDetails = await checkDuplication(ws, signal);
   } catch (e) {
     logError('runAllChecks.checkDuplication', e);
   }
 
+  // 9) Secret scanning
   outputChannel.appendLine('-> scanSecrets');
   try {
-    secrets = await scanSecrets(ws);
+    secrets = await scanSecrets(ws, signal);
   } catch (e) {
     logError('runAllChecks.scanSecrets', e);
   }
 
+  // 10) Dependency Graph
   outputChannel.appendLine('-> checkDepGraph');
   try {
-    depGraph = await checkDepGraph(ws);
+    depGraph = await checkDepGraph(ws, signal);
   } catch (e) {
     logError('runAllChecks.checkDepGraph', e);
   }
@@ -474,17 +534,19 @@ async function runAllChecks() {
     vuln: vulnPayload.data,
     licenseIssues,
     eslintDetails,
+    eslintIndustryDetails,
     duplicationDetails,
     secrets
   });
 
-
+  // 11) Final payload
   latestPayload = {
     outdated,
     vuln: vulnPayload.data,
     vulnError: vulnPayload.error,
     licenseIssues,
     eslintDetails,
+    eslintIndustryDetails,    // <-- new!
     sonarResult,
     complexity,
     duplicationDetails,
@@ -500,7 +562,6 @@ async function runAllChecks() {
   });
 
   outputChannel.appendLine('runAllChecks done');
- 
 }
 
 
@@ -608,83 +669,160 @@ async function runLicenses(signal) {
   outputChannel.appendLine('runLicenses done');
 }
 
+function getWorkspaceRoot() {
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) {
+    return undefined;
+  }
+  return folders[0].uri.fsPath;
+}
 
-
-async function runESLint(signal) {
-  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!ws) {
+// ─── 2) runESLint now takes (signal, scope) ──────────────────────────────────
+async function runESLint(signal, scope) {
+  const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!wsRoot) {
     vscode.window.showErrorMessage('Open a workspace first');
     return;
   }
+
+  // resolve target folder based on scope
+  const target = scope === 'src'
+    ? path.join(wsRoot, 'src')
+    : wsRoot;
+
   outputChannel.show(true);
   if (signal.aborted) {
-    outputChannel.appendLine('runESLint: aborted before start');
+    outputChannel.appendLine(`runESLint: aborted before start (scope=${scope})`);
     return;
   }
-  outputChannel.appendLine('runESLint start');
+  outputChannel.appendLine(`runESLint start (scope=${scope}, target=${target})`);
+
   try {
-    const eslintDetails = await checkESLint(ws, signal);
+    // pass scope along to checkESLint too (for logging)
+    const eslintDetails = await checkESLint(target, signal, scope);
+
     if (signal.aborted) {
-      outputChannel.appendLine('runESLint: aborted before UI update');
+      outputChannel.appendLine(`runESLint: aborted before UI update (scope=${scope})`);
       return;
     }
+
     latestPayload.eslintDetails = eslintDetails;
-    panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
+    panel.webview.postMessage({
+      command: 'updateData',
+      payload: latestPayload
+    });
   } catch (e) {
     logError('runESLint', e);
-	 if (e.name === 'AbortError') {
-      outputChannel.appendLine('runESLint: aborted');
-    } else {
-      logError('runESLint', e);
+    if (e.name === 'AbortError') {
+      outputChannel.appendLine(`runESLint: aborted (scope=${scope})`);
     }
-
-
-
   }
-  outputChannel.appendLine('runESLint done');
+
+  outputChannel.appendLine(`runESLint done (scope=${scope})`);
 }
 
 
-
-
-async function runSonar(signal, scope = 'src') {
-  const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+async function runSonar(ws, signal) {
   if (!ws) {
     vscode.window.showErrorMessage('Open a workspace first');
     return;
   }
+
   outputChannel.show(true);
-  if (signal.aborted) {
+
+  if (!signal || signal.aborted) {
     outputChannel.appendLine('runSonar: aborted before start');
     return;
   }
+
   outputChannel.appendLine('runSonar start');
-  outputChannel.appendLine(`[runSonar] using scope: ${scope}`);
 
   try {
-   const sonarResult = await checkSonar(ws, signal, scope);
+    // call checkSonar without scope
+    const sonarResult = await checkSonar(ws, signal);
+
     if (signal.aborted) {
       outputChannel.appendLine('runSonar: aborted before UI update');
       return;
     }
+
     latestPayload.sonarResult = sonarResult;
     panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
   } catch (e) {
-    logError('runSonar', e);
-	 if (e.name === 'AbortError') {
+    if (e?.name === 'AbortError') {
       outputChannel.appendLine('runSonar: aborted');
     } else {
       logError('runSonar', e);
     }
-
-
   }
+
   outputChannel.appendLine('runSonar done');
 }
 
+module.exports = { runSonar };
 
 
+async function runIndustryESLint(signal, scope) {
+  try {
+    // 1) load the industry config
+    const configPath = path.resolve(__dirname, ".eslintrc.industry.cjs");
+    const config     = require(configPath);
+    const linter     = new Linter();
 
+    // 2) build one glob for both .js and .ts
+    const globPattern = scope === "."
+      ? "**/*.{js,ts}"
+      : `${scope}/**/*.{js,ts}`;
+
+    // 3) exclude your common VCS, build and output folders
+    const exclude = '**/{.git,node_modules,dist,report,.scannerwork,cleaned,my-ext,deptrack}/**';
+
+    // 4) expand to actual files, skipping all excludes
+    const uris = await vscode.workspace.findFiles(globPattern, exclude);
+
+    // 5) send the raw list of files to the webview
+    const files = uris.map(uri =>
+      path.relative(vscode.workspace.rootPath, uri.fsPath)
+    );
+    webviewPanel.webview.postMessage({
+      command: "scanningFiles",
+      payload: { files }
+    });
+
+    // 6) now lint each file
+    const details = [];
+    for (const uri of uris) {
+      const filePath = uri.fsPath;
+      const code     = fs.readFileSync(filePath, "utf8");
+      const messages = linter.verify(code, config, { filename: filePath });
+
+      for (const m of messages) {
+        details.push({
+          file:    path.relative(vscode.workspace.rootPath, filePath),
+          line:    m.line,
+          rule:    m.ruleId || "(unknown)",
+          message: m.message
+        });
+      }
+    }
+
+    // 7) finally send results
+    webviewPanel.webview.postMessage({
+      command: "updateData",
+      payload:  { eslintIndustryDetails: details }
+    });
+	
+	outputChannel.appendLine('[runIndustryESLint] done scanning');
+  } catch (err) {
+    outputChannel.appendLine(`[runIndustryESLint] ERROR: ${err.message}`);
+    webviewPanel.webview.postMessage({
+      command: "eslintIndustryError",
+      payload: { message: err.message }
+    });
+	
+  }
+}
+	
 async function runComplexity(signal) {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) {
@@ -874,11 +1012,6 @@ async function runFixes(signal) {
   outputChannel.appendLine('runFixes done');
 }
 
-
-
-
-
-
 // Helper functions with AbortSignal support
 
 async function scanSecrets(ws, signal) {
@@ -886,7 +1019,7 @@ async function scanSecrets(ws, signal) {
   if (signal.aborted) return [];
   outputChannel.appendLine('[Secrets] start');
   const results = [];
-  const ignored = ['.git', 'node_modules', 'dist', 'report', '.scannerwork'];
+  const ignored = ['.git', 'node_modules', 'dist', 'report', '.scannerwork','cleaned'];
 
   async function walk(dir) {
     if (signal.aborted) return;
@@ -1139,74 +1272,124 @@ async function checkLicenses(ws, signal) {
   return res;
 }
 
-async function checkESLint(ws, signal) {
+// ─── 3) checkESLint now takes (ws, signal, scope) ───────────────────────────
+async function checkESLint(ws, signal, scope) {
   const fn = 'checkESLint';
   if (signal.aborted) return [];
-  outputChannel.appendLine('[ESLint] start');
+
+  outputChannel.appendLine(`[checkESLint] start (scope=${scope}, ws=${ws})`);
 
   const patterns = ['**/*.{js,jsx,ts,tsx}'];
-  const ignore   = ['node_modules/**','dist/**','report/**','coverage/**','deptrack/**','media/**','cleaned/**'];
+  const ignore   = [
+    'node_modules/**','dist/**','report/**',
+    'coverage/**','deptrack/**','media/**',
+    'cleaned/**','my-ext/**'
+  ];
+
   let files;
-  try { files = await fg(patterns,{cwd:ws,onlyFiles:true,absolute:true,ignore}); }
-  catch(e){ logError(fn,e); outputChannel.appendLine('[ESLint] done'); return []; }
-  if (!files.length || signal.aborted) { outputChannel.appendLine('[ESLint] done'); return []; }
-  for (const f of files) { if (signal.aborted) break; outputChannel.appendLine(`[ESLint] will lint: ${path.relative(ws,f)}`); }
-
-  const binName  = process.platform==='win32'?'eslint.cmd':'eslint';
-  const localBin = path.join(ws,'node_modules','.bin',binName);
-  const eslintBin= fs.existsSync(localBin)?`"${localBin}"`:'eslint';
-  const configF  = path.join(ws,'eslint.config.cjs');
-  const args     = [`-c "${configF}"`,'-f json',...files.map(f=>`"${f}"`)].join(' ');
-  const cmd      = `${eslintBin} ${args}`;
-
-  let raw='';
   try {
-    const out = await execP(cmd,{cwd:ws,signal,maxBuffer:20*1024*1024});
-    raw = (out.stdout||'').trim()||(out.stderr||'').trim();
-  } catch(e){ if (!signal.aborted) raw=(e.stdout||'').trim()||(e.stderr||'').trim(); }
-  if (!raw || signal.aborted) { outputChannel.appendLine('[ESLint] done'); return []; }
+    files = await fg(patterns, {
+      cwd: ws,
+      onlyFiles: true,
+      absolute: true,
+      ignore
+    });
+  } catch (e) {
+    logError(fn, e);
+    outputChannel.appendLine('[checkESLint] done with error');
+    return [];
+  }
 
-  const first = raw.indexOf('['); const last = raw.lastIndexOf(']');
-  const jsonText = (first>=0&&last>first)?raw.slice(first,last+1):'';
+  if (!files.length || signal.aborted) {
+    outputChannel.appendLine('[checkESLint] nothing to lint or aborted');
+    return [];
+  }
+
+  files.forEach(f => {
+    if (!signal.aborted)
+      outputChannel.appendLine(`[checkESLint] will lint: ${path.relative(ws, f)}`);
+  });
+
+  // build ESLint CLI command
+  const binName   = process.platform === 'win32' ? 'eslint.cmd' : 'eslint';
+  const localBin  = path.join(ws, 'node_modules', '.bin', binName);
+  const eslintBin = fs.existsSync(localBin) ? `"${localBin}"` : 'eslint';
+  const wsRoot    = vscode.workspace.workspaceFolders[0].uri.fsPath;
+  const configF   = path.join(wsRoot, 'eslint.config.cjs');
+  const args      = [`-c "${configF}"`, '-f json', ...files.map(f => `"${f}"`)].join(' ');
+  const cmd       = `${eslintBin} ${args}`;
+
+  let raw = '';
+  try {
+    const out = await execP(cmd, {
+      cwd: ws,
+      signal,
+      maxBuffer: 20 * 1024 * 1024
+    });
+    raw = (out.stdout || '').trim() || (out.stderr || '').trim();
+  } catch (e) {
+    if (!signal.aborted)
+      raw = (e.stdout || '').trim() || (e.stderr || '').trim();
+  }
+
+  if (!raw || signal.aborted) {
+    outputChannel.appendLine('[checkESLint] done (no output or aborted)');
+    return [];
+  }
+
+  // safely extract JSON array
+  const first = raw.indexOf('[');
+  const last  = raw.lastIndexOf(']');
+  if (first < 0 || last <= first) {
+    outputChannel.appendLine('[checkESLint] no JSON array found, skipping');
+    return [];
+  }
+
   let results;
-  try { results = JSON.parse(jsonText); } catch(pe){ logError(fn,pe); outputChannel.appendLine('[ESLint] done'); return []; }
+  try {
+    results = JSON.parse(raw.slice(first, last + 1));
+  } catch (pe) {
+    logError(fn, pe);
+    outputChannel.appendLine('[checkESLint] JSON parse failed, skipping');
+    return [];
+  }
 
   const res = [];
   for (const fileResult of results) {
     if (signal.aborted) break;
-    const rel = path.relative(ws,fileResult.filePath);
-    if (/^(node_modules|dist|report|coverage|deptrack)[\/\\]/.test(rel)) continue;
+    const rel = path.relative(ws, fileResult.filePath);
+    // skip unwanted directories
+    if (/^(node_modules|dist|report|coverage|deptrack)[\/\\]/.test(rel))
+      continue;
     for (const msg of fileResult.messages) {
-      res.push({ file:rel, line:msg.line, rule:msg.ruleId, message:msg.message });
+      res.push({
+        file:    rel,
+        line:    msg.line,
+        rule:    msg.ruleId,
+        message: msg.message
+      });
     }
   }
-  if (!signal.aborted) outputChannel.appendLine('[ESLint] done');
+
+  outputChannel.appendLine('[checkESLint] done');
   return res;
 }
 
-async function checkSonar(ws, signal, scope = 'src') {
+
+async function checkSonar(ws, signal) {
   // 0) Early abort
   if (signal?.aborted) {
     return { passed: true, summary: 'Skipped', metrics: {} };
   }
 
-  // 1) Read config & env vars
-  const cfg = vscode.workspace.getConfiguration();
-  const token      = cfg.get('deptrack.sonar.token')?.trim()      || process.env.SONAR_TOKEN?.trim();
-  const projectKey = cfg.get('deptrack.sonar.projectKey')?.trim() || process.env.SONAR_PROJECT_KEY?.trim();
-  const host       = (cfg.get('deptrack.sonar.hostUrl') ||
-                      process.env.SONAR_HOST_URL ||
-                      'https://sonarcloud.io').replace(/\/$/, '');
+  // 1) Hardcoded credentials
+  const token = '5b00f48971c97adc419af174c881cdc909161c67';
+  const projectKey = 'AmanKumar636_DepTrack';
+  const host = 'https://sonarcloud.io';
 
   outputChannel.appendLine(
-    `[Sonar] token=${token?.slice(0,4) || '—'}… projectKey=${projectKey || '—'} host=${host}`
+    `[Sonar] token=${token.slice(0,4)}… projectKey=${projectKey} host=${host}`
   );
-  if (!token || !projectKey) {
-    outputChannel.appendLine(
-      `[Sonar] skipped — set deptrack.sonar.token & projectKey or export SONAR_TOKEN & SONAR_PROJECT_KEY`
-    );
-    return { passed: true, summary: 'Skipped', metrics: {} };
-  }
 
   // 2) Locate sonar-scanner CLI
   const scanner = resolveCmd(ws, 'sonar-scanner');
@@ -1222,7 +1405,6 @@ async function checkSonar(ws, signal, scope = 'src') {
     `-Dsonar.host.url=${host}`,
     '-Dsonar.qualitygate.wait=true',
     '-Dsonar.scm.disabled=true',
-    `-Dsonar.sources=${scope}`,
     `-Dsonar.exclusions=**/report/**,**/coverage/**,**/*.html,**/fixtures/**,**/.scannerwork/**,**/node_modules/**,**/dist/**`,
     '-Dsonar.cpd.javascript.minimumTokens=50',
     '-Dsonar.threads=4',
@@ -1282,6 +1464,8 @@ async function checkSonar(ws, signal, scope = 'src') {
 }
 
 module.exports = { checkSonar };
+
+
 
 
 async function checkComplexity(ws, signal) {
@@ -1348,48 +1532,110 @@ async function checkDuplication(ws, signal, threshold = 3) {
   return res;
 }
 
-async function getSuggestedFixes({ outdated={}, vuln={}, licenseIssues=[], eslintDetails=[], duplicationDetails=[], secrets=[] }, signal) {
-  if (signal.aborted) return [];
+async function getSuggestedFixes(
+  {
+    outdated = {},
+    vuln = {},
+    licenseIssues = [],
+    eslintDetails = [],
+    duplicationDetails = [],
+    secrets = []
+  },
+  signal
+) {
+  // 0) If the user cancelled, bail out immediately
+  if (signal?.aborted) return [];
+
   const fixes = [];
+
+  // 1) Outdated packages
   for (const [pkg, info] of Object.entries(outdated)) {
-    fixes.push({ pkg, fix: `Update to ${info.latest}` });
+    if (signal?.aborted) return fixes;
+    fixes.push({
+      pkg,
+      fix: `Update to ${info.latest}`
+    });
   }
-  if (signal.aborted) return fixes;
-  for (const [pkg, list] of Object.entries(vuln)) list.forEach(v => fixes.push({ pkg, fix: /upgrade to ([\d.]+)/i.test(v.title) ? `Upgrade to ${RegExp.$1}` : v.title.startsWith('Insecure') ? 'Review & patch vulnerability' : `Review vulnerability: "${v.title}"` }));
-  if (signal.aborted) return fixes;
-  licenseIssues.forEach(x=>fixes.push({ pkg: x.pkg, fix: `Consider replacing or upgrading (forbidden: ${x.licenses.join(', ')})`}));
-  if (signal.aborted) return fixes;
-  const eslintByFile = eslintDetails.reduce((acc,e)=>(acc[e.file]||(acc[e.file]=[])).push(e),{});
-  for (const [file,msgs] of Object.entries(eslintByFile)) {
-    if (signal.aborted) break;
-    fixes.push({ pkg:file, fix: msgs.some(m=>m.rule&&m.rule!=='semi') ? `eslint --fix "${file}"` : 'Add missing semicolons' });
+
+  // 2) Vulnerabilities
+  for (const [pkg, list] of Object.entries(vuln)) {
+    if (signal?.aborted) return fixes;
+    list.forEach(v => {
+      let suggestion;
+      if (/upgrade to ([\d.]+)/i.test(v.title)) {
+        suggestion = `Upgrade to ${RegExp.$1}`;
+      } else if (v.title.startsWith('Insecure')) {
+        suggestion = 'Review & patch vulnerability';
+      } else {
+        suggestion = `Review vulnerability: "${v.title}"`;
+      }
+      fixes.push({ pkg, fix: suggestion });
+    });
   }
-  if (signal.aborted) return fixes;
-  secrets.forEach(s=>fixes.push({ pkg: s.file, fix: `Remove hard‐coded ${s.rule} and inject via secure env variable`}));
-  if (signal.aborted) return fixes;
-  duplicationDetails.forEach(d=>fixes.push({ pkg:`${d.fileA} & ${d.fileB}`, fix: `Extract common logic at lines ${d.lineA}/${d.lineB}`}));
+
+  // 3) License issues
+  for (const x of licenseIssues) {
+    if (signal?.aborted) return fixes;
+    fixes.push({
+      pkg: x.pkg,
+      fix: `Consider replacing or upgrading (forbidden: ${x.licenses.join(', ')})`
+    });
+  }
+
+  // 4) ESLint issues by file
+  if (signal?.aborted) return fixes;
+  const eslintByFile = eslintDetails.reduce((acc, e) => {
+    (acc[e.file] ||= []).push(e);
+    return acc;
+  }, {});
+  for (const [file, msgs] of Object.entries(eslintByFile)) {
+    if (signal?.aborted) break;
+    // if any rule other than semi, suggest auto-fix
+    const hasAutoFixable = msgs.some(m => m.rule && m.rule !== 'semi');
+    fixes.push({
+      pkg: file,
+      fix: hasAutoFixable
+        ? `eslint --fix "${file}"`
+        : 'Add missing semicolons'
+    });
+  }
+
+  // 5) Secrets
+  for (const s of secrets) {
+    if (signal?.aborted) return fixes;
+    fixes.push({
+      pkg: s.file,
+      fix: `Remove hard‐coded ${s.rule} and inject via secure env var`
+    });
+  }
+
+  // 6) Duplication
+  for (const d of duplicationDetails) {
+    if (signal?.aborted) return fixes;
+    fixes.push({
+      pkg: `${d.fileA} & ${d.fileB}`,
+      fix: `Extract common logic at lines ${d.lineA}/${d.lineB}`
+    });
+  }
+
   return fixes;
 }
 
 
 
-
-let webviewPanel; // you’ll need to set this when you create your WebviewPanel
-
 async function sendEmailNotification(subject, text, overrideTo, attachments = []) {
-  const cfg = vscode.workspace.getConfiguration('deptrack.email');
-  const user = cfg.get('auth.user');
-  const pass = cfg.get('auth.pass');
-  const defaultTo = cfg.get('to');
-  const service = cfg.get('service') || 'gmail';
-  const to = overrideTo || defaultTo;
+  // HARDCODED values
+  const user = 'cs24m114@iittp.ac.in';
+  const pass = 'alqw frfl bwmc cbdm'; // App-specific password, not your Gmail login
+  const to   = overrideTo || 'amankmr636@gmail.com';
+  const service = 'gmail';
 
   console.log('[DepTrack] sendEmailNotification config →', {
     service, user, hasPass: !!pass, to, subject, text, attachments
   });
 
   if (!user || !pass || !to) {
-    const msg = 'Missing email configuration: auth.user, auth.pass, and to must all be set.';
+    const msg = 'Missing hardcoded email configuration';
     console.error('[DepTrack] ' + msg);
     webviewPanel?.webview.postMessage({
       command: 'emailStatus',
@@ -1405,10 +1651,10 @@ async function sendEmailNotification(subject, text, overrideTo, attachments = []
     if (attachments.length) mailOptions.attachments = attachments;
     const info = await transporter.sendMail(mailOptions);
     console.log('[DepTrack] Email sent:', info.messageId);
-    webviewPanel.webview.postMessage({ command: 'emailStatus', success: true });
+    webviewPanel?.webview.postMessage({ command: 'emailStatus', success: true });
   } catch (err) {
     console.error('[DepTrack] sendMail error:', err);
-    webviewPanel.webview.postMessage({
+    webviewPanel?.webview.postMessage({
       command: 'emailStatus',
       success: false,
       error: err.message
@@ -1419,11 +1665,14 @@ async function sendEmailNotification(subject, text, overrideTo, attachments = []
 /**
  * Helper to run a check with an AbortSignal
  */
-async function withAbort(viewName, checkFn) {
+ async function withAbort(viewName, checkFn) {
+  if (abortControllers[viewName]) {
+    abortControllers[viewName].abort();
+  }
   const controller = new AbortController();
   abortControllers[viewName] = controller;
+
   try {
-    // call checkFn with the signal
     await checkFn(controller.signal);
   } catch (err) {
     if (controller.signal.aborted) {
@@ -1435,6 +1684,7 @@ async function withAbort(viewName, checkFn) {
     delete abortControllers[viewName];
   }
 }
+
 
 // Example: hook up your message handler so that `sendEmail` command invokes this
 function registerMessageListener(panel) {
@@ -1557,6 +1807,7 @@ function withAbort(viewName, checkFn) {
   abortControllers[viewName] = controller;
   return checkFn(controller.signal);
 }
+
 
 function exportPdf() {
   if (!latestPayload) return;
