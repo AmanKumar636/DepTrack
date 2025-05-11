@@ -20,7 +20,7 @@ const { Linter } = require("eslint");
 let latestEslintScope = 'src';
 
 
-const HF_HUB_TOKEN = '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';
+const HF_HUB_TOKEN = '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';
 
 if (!HF_HUB_TOKEN) {
   console.warn('⚠️  HF_HUB_TOKEN is not set! Check your .env.');
