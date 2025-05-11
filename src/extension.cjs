@@ -62,7 +62,8 @@ let latestPayload = {
   secrets: [],
   depGraph: {},
   chatHistory: [],
-  suggestedFixes: []
+  suggestedFixes: [],
+  
 };
 
 function logError(fnName, err) {
@@ -448,6 +449,7 @@ async function runAllChecks(signal) {
   outputChannel.show(true);
   outputChannel.appendLine('runAllChecks start');
 
+
   // 1) Outdated packages
   outputChannel.appendLine('-> checkOutdated');
   try {
@@ -483,7 +485,7 @@ async function runAllChecks(signal) {
   // 5) Industry-grade ESLint
   outputChannel.appendLine(`-> runIndustryESLint (scope=${latestEslintScope})`);
   try {
-   const eslintIndustryDetails = await runIndustryESLint(ws, signal, latestEslintScope);
+  eslintIndustryDetails = await runIndustryESLint(signal, latestEslintScope);
   } catch (e) {
     logError('runAllChecks.checkIndustryESlint', e);
   }
