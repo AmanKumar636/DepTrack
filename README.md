@@ -18,8 +18,8 @@ DepTrack is a lightweight Visual Studio Code extension that helps you keep your 
 1. [Supported Operating Systems](#supported-operating-systems)  
 2. [Prerequisites](#prerequisites)  
 3. [Installation](#installation)  
-4. [Usage](#usage)
-5. [Key Features](#keyfeatures)
+4. [Usage](#usage)  
+5. [Key Features](#key-features)  
 6. [Configuration](#configuration)  
 7. [Development & Building from Source](#development--building-from-source)  
 8. [Troubleshooting](#troubleshooting)  
@@ -74,21 +74,20 @@ After installation, restart VS Code or run Developer: Reload Window.
 3. Run DepTrack: DepTrack: Open Dashboard to bring up the DepTrack panel.
 4. Use the toolbar buttons to scan for:
 
-  a.Outdated Packages
-  b.Vulnerabilities
-  c.License Issues
-  d.ESLint Issues
-  e.Code Duplication
-  f.Cyclomatic Complexity
-  g.Secrets
-  h.Dependency Graph
-  i.Sonar Report
-  j.Suggested fixes
-  k.Industry Standard Code
-  l.Chatbot Assistance
-
-===
+  - Outdated Packages
+  - Vulnerabilities
+  - License Issues
+  - ESLint Issues
+  - Code Duplication
+  - Cyclomatic Complexity
+  - Secrets
+  - Dependency Graph
+  - Sonar Report
+  - Suggested fixes
+  - Industry Standard Code
+  - Chatbot Assistance
   
+---
 ## Key Features
 
 - **Outdated Packages**  
@@ -112,6 +111,9 @@ After installation, restart VS Code or run Developer: Reload Window.
 - **Secrets Detection**  
   Scans for accidentally committed API keys, passwords, and other secrets.
 
+- **Industry Standard Code** <br>
+  Check your code if it follows industry standards.
+  
 - **Dependency Graph**  
   Visualizes your project’s dependency graph with major version breakdowns.
 
@@ -122,13 +124,9 @@ After installation, restart VS Code or run Developer: Reload Window.
   • Export scan results as CSV or PDF  
   • Send email alerts or schedule PDF/CSV reports via SMTP  
 
-- **Industry Standard Code**
-- Check your code if it follow industry standards.
-
 - **AI-Powered Chatbot**  
   Ask questions, get suggestions or guidance about your code and dependencies using built-in AI assistance.
-
-===
+---
 
 ## Configuration
 
