@@ -15,6 +15,7 @@
     .email-row input{flex:1;padding:0.5rem;border-radius:var(--radius);border:none;background:var(--card-bg);color:var(--text-light)}
     .email-row button{padding:0.5rem 1rem;border:none;border-radius:var(--radius);background:var(--accent);color:#fff;cursor:pointer;transition:background .3s,transform .2s;box-shadow:0 4px 8px rgba(0,0,0,0.3)}
     .email-row button:hover{background:rgba(58,115,183,1);transform:translateY(-2px)}
+	 
     aside#aside button{display:flex;align-items:center;gap:0.5rem;padding:0.75rem;border:none;background:none;color:var(--text-light);border-radius:var(--radius);cursor:pointer;transition:background .2s}
     aside#aside button:hover,aside#aside button.active{background:rgba(74,144,226,0.2)}
     main#main{flex:1;display:flex;flex-direction:column}
@@ -53,23 +54,22 @@
     .card-refresh,.card-stop,.card-delete{background:none;border:none;cursor:pointer;font-size:1rem;color:var(--accent)}
     .spinner{display:none;margin-left:.5rem}.spin{display:inline-block;animation:spin 1s linear infinite}@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
     .card[data-view="sonar"]{flex:1 1 100%;min-width:auto}
+
 .card[data-view="duplication"] {
-  height: auto !important;
+  flex: 1 1 calc(33% - var(--gap));
+  height: 50% !important;
 }
 
-/* make content a column flexbox */
 .card[data-view="duplication"] .content {
   display: flex;
   flex-direction: column;
   height: 100%;
 }
 
-/* keep the controls at natural height */
 #dupControls {
   flex: 0 0 auto;
 }
 
-/* let the table take remaining space and scroll */
 #dupTableContainer {
   flex: 1 1 auto;
   overflow-y: auto;
@@ -169,12 +169,13 @@
     <div id="controls">
       <select id="viewSelect">
         <option value="outdated">Outdated</option>
-        <option value="vuln">Vuln</option>
+        <option value="vuln">Vulnerability</option>
         <option value="license">Licenses</option>
-        <option value="eslint">ESLint</option>
+        <option value="eslint">Code Issue</option>
+		 <option value="eslintIndustry">Industry Standards</option>
         <option value="duplication">Duplication</option>
         <option value="complexity">Complexity</option>
-        <option value="secret">Secrets</option>
+        <option value="secret">Secrets Key</option>
         <option value="depgraph">DepGraph</option>
         <option value="fixes">Suggested Fixes</option>
         <option value="sonar">Sonar</option>
@@ -189,7 +190,7 @@
         <header>
           Process Log
           <div class="actions">
-            <button class="card-delete" data-view="log">🗑️</button>
+           <button class="card-delete" data-view="log">🗑️</button>
           </div>
           <span id="logStatus" class="status-dot"></span>
         </header>
@@ -237,18 +238,35 @@
         </header>
         <div class="content"><table id="licenseTable"><thead><tr><th>Pkg</th><th>License</th></tr></thead><tbody></tbody></table></div>
       </div>
-      <div class="card" data-view="eslint">
-        <header>
-          ESLint Issues
-          <div class="actions">
-            <button class="card-refresh" data-view="eslint">🔄</button>
-            <button class="card-stop" data-view="eslint">⏹️</button>
-            <span class="spinner">⏳</span>
-          </div>
-        </header>
-        <div class="content"><table id="eslintTable"><thead><tr><th>File</th><th>Line</th><th>Rule</th><th>Msg</th></tr></thead><tbody></tbody></table></div>
-      </div>
-     <div class="card" data-view="duplication">
+      <!-- ESLint Card -->
+<div class="card" data-view="eslint">
+  <header style="display:flex;justify-content:space-between;align-items:center;">
+    <span>Code Issues</span>
+    <div class="actions" style="display:flex;align-items:center;gap:0.5rem;">
+      <label for="eslintScope" style="color:var(--text-light);">Scope</label>
+      <select id="eslintScope"
+              style="padding:0.5rem;border-radius:var(--radius);border:none;
+                     background:var(--card-bg);color:var(--text-light);">
+        <option value="src">src/</option>
+        <option value=".">all/</option>
+      </select>
+      <button class="card-refresh" data-view="eslint">🔄</button>
+      <button class="card-stop"    data-view="eslint">⏹️</button>
+      <span class="spinner">⏳</span>
+    </div>
+  </header>
+  <div class="content">
+    <table id="eslintTable">
+      <thead>
+        <tr><th>File</th><th>Line</th><th>Rule</th><th>Message</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Duplication Card -->
+<div class="card" data-view="duplication">
   <header>
     Duplication
     <div class="actions">
@@ -258,30 +276,25 @@
     </div>
   </header>
   <div class="content">
-    <!-- Controls stay at natural height -->
-   <div id="dupControls" style="margin-bottom: 0.8rem; display: flex; align-items: center; justify-content: space-between; background: var(--card-bg-alt); padding: 0.5rem 0.75rem; border-radius: var(--radius); box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
-  <div style="display: flex; align-items: center; gap: 0.5rem;">
-    <label for="dupThreshold" style="font-weight: 500; color: var(--text-light); font-size: 0.95rem;">Threshold(token):</label>
-    <input
-      id="dupThreshold"
-      type="number"
-      min="1"
-      value="5"
-      style="width: 70px; padding: 0.3rem 0.4rem; font-size: 0.9rem; border-radius: 6px; border: 1px solid var(--accent); background: var(--card-bg); color: var(--text-light);"
-    />
-  </div>
-  <button
-    id="applyDupThreshold"
-    style="padding: 0.35rem 0.9rem; font-size: 0.9rem; border-radius: 6px; background: var(--accent); color: #fff; border: none; cursor: pointer; transition: background 0.3s;"
-    onmouseover="this.style.background='#0066cc';"
-    onmouseout="this.style.background='var(--accent)';"
-  >
-    Apply/Run
-  </button>
-</div>
-
-    <!-- Table container will fill remaining space and scroll -->
-    <div id="dupTableContainer">
+    <div id="dupControls" style="margin-bottom:0.8rem;
+                                 display:flex;align-items:center;justify-content:space-between;
+                                 background:var(--card-bg-alt);padding:0.5rem 0.75rem;
+                                 border-radius:var(--radius);box-shadow:0 1px 3px rgba(0,0,0,0.2);">
+      <div style="display:flex;align-items:center;gap:0.5rem;">
+        <label for="dupThreshold" style="font-weight:500;color:var(--text-light);
+                                         font-size:0.95rem;">Threshold(token):</label>
+        <input id="dupThreshold" type="number" min="1" value="5"
+               style="width:70px;padding:0.3rem 0.4rem;font-size:0.9rem;
+                      border-radius:6px;border:1px solid var(--accent);
+                      background:var(--card-bg);color:var(--text-light);"/>
+      </div>
+      <button id="applyDupThreshold"
+              style="padding:0.35rem 0.9rem;font-size:0.9rem;border-radius:6px;
+                     background:var(--accent);color:#fff;border:none;cursor:pointer;">
+        Apply/Run
+      </button>
+    </div>
+    <div id="dupTableContainer" style="flex:1 1 auto;overflow-y:auto;">
       <table id="dupTable">
         <thead>
           <tr><th>A</th><th>Line(A)</th><th>B</th><th>Line(B)</th></tr>
@@ -291,7 +304,6 @@
     </div>
   </div>
 </div>
-
       <div class="card" data-view="complexity">
         <header>
           Complexity
@@ -336,27 +348,48 @@
         </header>
         <div class="content"><table id="fixTable"><thead><tr><th>Package</th><th>Fix</th></tr></thead><tbody></tbody></table></div>
       </div>
+	  
       <div class="card" data-view="sonar">
    <header style="display:flex;justify-content:space-between;align-items:center;">
-  <span>Sonar Report</span>
+  <span>Quality Report</span>
   <div class="actions" style="display:flex;align-items:center;gap:0.5rem;">
-    <label for="sonarScope" style="color:var(--text-light);">Scope:</label>
-    <select
-      id="sonarScope"
-      style="padding:0.5rem;border-radius:var(--radius);border:none;background:var(--card-bg);color:var(--text-light);"
-    >
-      <option value="src">src/ only</option>
-      <option value=".">all files</option>
-    </select>
     <button class="card-refresh" data-view="sonar">🔄</button>
     <button class="card-stop"    data-view="sonar">⏹️</button>
     <span class="spinner">⏳</span>
   </div>
 </header>
-
-        <div class="content"><pre id="sonarOutput"></pre><div id="sonarMetrics" class="metrics-container"></div></div>
+<div class="content"><pre id="sonarOutput"></pre><div id="sonarMetrics" class="metrics-container"></div></div>
+ </div>
+  
+   <!-- Industry Standards ESLint Card -->
+  <div class="card" data-view="eslintIndustry">
+    <header style="display:flex;justify-content:space-between;align-items:center;">
+      <span>Industry Standards Code</span>
+      <div class="actions" style="display:flex;align-items:center;gap:0.5rem;">
+        <select id="eslintIndustryScope" style="padding:0.5rem;border-radius:var(--radius);border:none;
+                     background:var(--card-bg);color:var(--text-light);">
+          <option value=".">all/</option>
+          <option value="src">src/</option>
+        </select>
+        <button class="card-refresh" data-view="eslintIndustry">🔄</button>
+        <button class="card-stop"    data-view="eslintIndustry">⏹️</button>
+        <span class="spinner">⏳</span>
       </div>
-      <div class="card" data-view="chatbot">
+    </header>
+    <div class="content">
+      <table class="table" data-view="eslintIndustry">
+        <thead>
+          <tr><th>File</th><th>Line</th><th>Rule</th><th>Message</th></tr>
+        </thead>
+        <tbody>
+          <!-- populated by your renderer -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+
+  <div class="card" data-view="chatbot">
         <header>Chatbot</header>
         <div class="content">
           <div id="chatContainer"></div>
@@ -402,23 +435,24 @@ function capitalize(s) {
     
 	document.getElementById('email').addEventListener('click',()=>{emailSpinner.classList.add('spin');vscode.postMessage({command:'sendEmail'});setTimeout(()=>emailSpinner.classList.remove('spin'),2000);});
 	
-	
-	
-// PDF-report button: spin while sending, then stop after 2s
-document.getElementById('sendReportBtn').addEventListener('click', () => {
-  reportSpinner.classList.add('spin');
-  vscode.postMessage({ command: 'sendReportEmail' });
-  setTimeout(() => reportSpinner.classList.remove('spin'), 2000);
-});
 
-// CSV-report button: spin while sending, then stop after 2s
-document.getElementById('sendCsvBtn').addEventListener('click', () => {
-  csvReportSpinner.classList.add('spin');
-  vscode.postMessage({ command: 'sendCsvReportEmail' });
-  setTimeout(() => csvReportSpinner.classList.remove('spin'), 2000);
-});
+  // “Send PDF Report” button
+  document.getElementById('sendReportBtn').addEventListener('click', () => {
+    const override = document.getElementById('emailInput').value.trim() || undefined;
+    vscode.postMessage({
+      command: 'sendReportEmail',
+      email: override
+    });
+  });
 
-	
+  // “Send CSV Report” button
+  document.getElementById('sendCsvBtn').addEventListener('click', () => {
+    const override = document.getElementById('emailInput').value.trim() || undefined;
+    vscode.postMessage({
+      command: 'sendCsvReportEmail',
+      email: override
+    });
+  });	
     
 	document.getElementById('csv').addEventListener('click',()=>{csvSpinner.classList.add('spin');vscode.postMessage({command:'exportCSV'});setTimeout(()=>csvSpinner.classList.remove('spin'),2000);});
     
@@ -446,16 +480,30 @@ document.getElementById('sendCsvBtn').addEventListener('click', () => {
   }
 });
 
-    document.querySelectorAll('.card-refresh').forEach(btn => {
+   // wire up every card-refresh *except* ESLint (it has its own scoped handler below)
+document.querySelectorAll('.card-refresh').forEach(btn => {
+  const view = btn.dataset.view;
+  if (view === 'eslint') return;        // ← skip ESLint here
+
   btn.addEventListener('click', () => {
-    const view = btn.dataset.view;
     console.log(`Refreshing ${view}`);
     const sp = btn.parentElement.querySelector('.spinner');
     sp.classList.add('spin');
-    // send a view-specific command to your extension
     vscode.postMessage({ command: `refresh${view[0].toUpperCase()}${view.slice(1)}` });
   });
 });
+
+// Industry-Standards refresh handler
+document
+  .querySelector('.card-refresh[data-view="eslintIndustry"]')
+  .addEventListener('click', e => {
+    e.stopImmediatePropagation();
+    const scope = document.getElementById('eslintIndustryScope').value;
+    const spinner = document.querySelector('.card[data-view="eslintIndustry"] .spinner');
+    spinner.classList.add('spin');
+    vscode.postMessage({ command: 'refreshEslintIndustry', scope });
+  });
+
 
 document.querySelector('.card-refresh[data-view="sonar"]').addEventListener('click', () => {
     const scope = document.getElementById('sonarScope').value;
@@ -466,6 +514,24 @@ vscode.postMessage({
   command: 'refreshSonar',
   scope 
 });
+  });
+  
+// ESLint override (scoped handler must come *after* the generic binding)
+document.querySelector('.card-refresh[data-view="eslint"]')
+  .addEventListener('click', (e) => {
+    // prevent the generic .card-refresh handler from also running
+    e.stopImmediatePropagation();
+
+    // read the dropdown (either "src" or ".")
+    const scope = document.getElementById('eslintScope').value;
+    console.log(`Refreshing eslint (scope=${scope})`);
+
+    // spin only the ESLint spinner
+    const sp = document.querySelector('.card[data-view="eslint"] .spinner');
+    sp.classList.add('spin');
+
+    // send the scoped command
+    vscode.postMessage({ command: 'refreshEslint', scope });
   });
   
   document.getElementById('applyDupThreshold').addEventListener('click', () => {
@@ -497,6 +563,7 @@ vscode.postMessage({
   
   
     document.querySelectorAll('.card-delete').forEach(btn=>{btn.addEventListener('click',()=>{document.getElementById('logOutput').textContent='';document.getElementById('logStatus').className='status-dot';});});
+
     document.getElementById('sendChat').addEventListener('click',()=>{const t=document.getElementById('chatInput').value.trim();if(t){const time=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});appendMessage('user',t,time);document.getElementById('chatInput').value='';vscode.postMessage({command:'chat',text:t});}});
     document.getElementById('chatInput').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('sendChat').click();});
     document.getElementById('clearChat').addEventListener('click',()=>{document.getElementById('chatContainer').innerHTML='';});
@@ -514,7 +581,25 @@ window.addEventListener('message', e => {
     appendMessage('bot', m.text, time);
     return;
   }
-
+  
+//------------Industry Standards Code------------------------------------------
+ const { command, payload } = e.data;
+  if (command === 'updateData' && payload.eslintIndustryDetails) {
+    const rows = payload.eslintIndustryDetails
+      .map(d => `<tr>
+                   <td>${d.file}</td>
+                   <td>${d.line}</td>
+                   <td>${d.rule}</td>
+                   <td>${d.message}</td>
+                 </tr>`)
+      .join('');
+    const tbody = document.querySelector('table[data-view="eslintIndustry"] tbody');
+    tbody.innerHTML = rows;
+    document.querySelector('.card[data-view="eslintIndustry"] .spinner')
+            .classList.remove('spin');
+			  }
+			  
+			  
   // ─── Process log updates ──────────────────────────────────────────────────
   if (m.command === 'logUpdate') {
     const L = m.payload || [];
@@ -715,8 +800,15 @@ document.querySelectorAll('#outdatedTable .update-btn').forEach(btn => {
   }
 });
 
+  window.onload = () => {
+    // 1) replay whatever activation logs we buffered
+    const initialLogs = [];
+    initialLogs.forEach(line => console.log(line));
 
-    window.onload=()=>{document.getElementById('scanAll').click();};
+    // 2) then kick off the default “Show All” scan
+    document.getElementById('scanAll').click();
+  };
+
 	
 
   </script>
