@@ -689,7 +689,12 @@ if (command === 'updateData' && payload.eslintIndustryDetails) {
   } else {
     console.warn('ESLint-Industry spinner not found.');
   }
+
+  // ─── Prevent the generic updateData handler from wiping everything else ───
+  return;
 }
+
+
 			  
 			  
 // ─── Process log updates ──────────────────────────────────────────────────
