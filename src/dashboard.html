@@ -287,7 +287,7 @@
                                  border-radius:var(--radius);box-shadow:0 1px 3px rgba(0,0,0,0.2);">
       <div style="display:flex;align-items:center;gap:0.5rem;">
         <label for="dupThreshold" style="font-weight:500;color:var(--text-light);
-                                         font-size:0.95rem;">Threshold(token):</label>
+                                         font-size:0.95rem;">Threshold:</label>
         <input id="dupThreshold" type="number" min="1" value="5"
                style="width:70px;padding:0.3rem 0.4rem;font-size:0.9rem;
                       border-radius:6px;border:1px solid var(--accent);
@@ -849,19 +849,57 @@ document.querySelectorAll('#outdatedTable .update-btn').forEach(btn => {
       `;
     });
 
-    // --- Dependency Graph ---
-    const dgLabels = Object.keys(d.depGraph || {});
-    const dgShort  = dgLabels.map(l => l.split(/[\\/]/).pop());
-    const dgValues = dgLabels.map(p =>
-      parseInt((d.depGraph[p].version || '0').split('.')[0], 10) || 0
-    );
-    const ctx2 = document.getElementById('dep-graph').getContext('2d');
-    depChart?.destroy();
-    depChart = new Chart(ctx2, {
-      type: 'bar',
-      data: { labels: dgShort, datasets: [{ label: 'Version (major)', data: dgValues }]},
-      options: { /* your existing options… */ }
-    });
+// --- Dependency Graph ---
+const declared = d.declared || [];              // ["express","lodash",…]
+const graph    = d.depGraph || {};              // { express: {version:"4.18.2"}, … }
+
+// ── Choose which packages to show ──────────────────────────────────────────────
+// Option A: only those declared in package.json
+const dgLabels = Object.keys(graph).filter(name =>
+  declared.includes(name)
+);
+
+// Option B: everything in the lockfile graph
+// const dgLabels = Object.keys(graph);
+
+// ── Short names (if your keys are full paths, strip them; otherwise this is identity) ──
+const dgShort = dgLabels.map(full =>
+  full.includes('/') || full.includes('\\')
+    ? full.split(/[\\/]/).pop()
+    : full
+);
+
+// ── Major‐version numbers ───────────────────────────────────────────────────────
+const dgValues = dgLabels.map(name => {
+  const ver = (graph[name].version || '0.0.0').split('.');
+  return parseInt(ver[0], 10) || 0;
+});
+
+// ── Render the chart ────────────────────────────────────────────────────────────
+const ctx = document.getElementById('dep-graph').getContext('2d');
+depChart?.destroy();
+depChart = new Chart(ctx, {
+  type: 'bar',
+  data: {
+    labels: dgShort,
+    datasets: [{
+      label: 'Version (major)',
+      data: dgValues,
+      // you can add styling here if you like
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: {
+      legend: { position: 'top' },
+      title: { display: true, text: 'Dependency Major Versions' }
+    },
+    scales: {
+      y: { beginAtZero: true, title: { display: true, text: 'Major Version' } },
+      x: { title: { display: true, text: 'Package' } }
+    }
+  }
+});
 
     // --- Sonar Report ---
     const outEl = document.getElementById('sonarOutput');
