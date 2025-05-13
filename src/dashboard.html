@@ -4,8 +4,9 @@
   <meta charset="UTF-8"/>
   <title>Welcome</title>
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' vscode-resource: data: https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data:;">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-  <style>
+ <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.24.0/dist/cytoscape.min.js"></script>
+ <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     :root{--bg-dark:#121417;--bg-darker:#0d0f12;--panel-bg:#1e2025;--card-bg:#1a1c21;--accent:#4a90e2;--text-light:#ffffff;--text-muted:#bbbbbb;--shadow:rgba(0,0,0,0.7);--radius:12px;--gap:1rem}
     body{display:flex;height:100vh;font-family:'Segoe UI',sans-serif;background:var(--bg-dark);color:var(--text-light)}
@@ -89,12 +90,15 @@
     .metrics-container .card{background:var(--panel-bg);padding:var(--gap);text-align:center;border-radius:var(--radius)}
     .metrics-container .card-title{font-size:1rem;margin-bottom:0.5rem}
     .metrics-container .card-value{font-size:1.25rem;font-weight:bold}
-    .card[data-view="chatbot"] .content{display:flex;flex-direction:column;height:100%}
+.card[data-view="complexity"] canvas {
+  height: 250px !important;
+}   
+   .card[data-view="chatbot"] .content{display:flex;flex-direction:column;height:100%}
 	/* Show (single-column) mode: make cards full-height */
 #cards.no-wrap .card {
   height: 100%;
 }
-
+	
     #chatContainer{flex:1;overflow-y:auto;padding-bottom:var(--gap);display:flex;flex-direction:column;gap:0.25rem}
     .chat-input-row{display:flex;gap:0.5rem;margin-top:0.5rem}
     .chat-input-row input{flex:1;border:none;border-radius:var(--radius);padding:0.5rem;background:var(--card-bg);color:var(--text-light)}
@@ -309,18 +313,21 @@
     </div>
   </div>
 </div>
-      <div class="card" data-view="complexity">
-        <header>
-          Complexity
-          <div class="actions">
-            <button class="card-refresh" data-view="complexity">🔄</button>
-            <button class="card-stop" data-view="complexity">⏹️</button>
-            <span class="spinner">⏳</span>
-          </div>
-        </header>
-        <div class="content"><canvas id="complexityChart" style="height:250px"></canvas></div>
-      </div>
-      <div class="card" data-view="secret">
+  <div class="card" data-view="complexity">
+  <header>
+    Complexity
+    <div class="actions">
+      <button class="card-refresh" data-view="complexity">🔄</button>
+      <button class="card-stop"    data-view="complexity">⏹️</button>
+      <span class="spinner">⏳</span>
+    </div>
+  </header>
+  <div class="content">
+    <!-- width attr is optional—CSS override handles height -->
+    <canvas id="complexityChart" width="600"></canvas>
+  </div>
+</div>
+    <div class="card" data-view="secret">
         <header>
           Secrets
           <div class="actions">
@@ -340,7 +347,9 @@
             <span class="spinner">⏳</span>
           </div>
         </header>
-        <div class="content"><canvas id="dep-graph" style="height:300px"></canvas></div>
+       <div class="content">
+   <div id="depGraph" style="width:100%; height:400px;"></div>
+ </div>
       </div>
       <div class="card" data-view="fixes">
         <header>
@@ -596,6 +605,12 @@ document.querySelector('.card-refresh[data-view="eslint"]')
   container.innerHTML = '';
 
   const getCard = name => allCards.find(c => c.dataset.view === name);
+  
+ if (view === 'complexity') {
+    // Tell the extension to send us complexityDetails
+    console.log('🔄 Requesting complexity data');
+    vscode.postMessage({ command: 'refreshComplexity' });
+  }  
 
   if (view === 'chatbot') {
     const card = getCard('chatbot');
@@ -645,7 +660,6 @@ document.getElementById('scanAll').addEventListener('click', () => {
 });
 
 
-
 window.addEventListener('message', e => {
   const m = e.data;
 
@@ -655,65 +669,46 @@ window.addEventListener('message', e => {
     appendMessage('bot', m.text, time);
     return;
   }
-  
- 
- 
 
-// ─── Industry Standards Code ──────────────────────────────────────────────
-const { command, payload } = e.data;
-if (command === 'updateData' && payload.eslintIndustryDetails) {
-  // 1. Build the rows HTML
-  const rows = payload.eslintIndustryDetails
-    .map(d => `
+  // ─── Industry Standards Code ──────────────────────────────────────────────
+  const { command, payload } = m;
+  if (command === 'updateData' && payload.eslintIndustryDetails) {
+    // Build rows
+    const rows = payload.eslintIndustryDetails.map(d => `
       <tr>
         <td>${d.file}</td>
         <td>${d.line}</td>
         <td>${d.rule}</td>
         <td>${d.message}</td>
-      </tr>`.trim()
-    )
-    .join('');
+      </tr>`.trim()).join('');
 
-  // 2. Find and update the <tbody>
-  const tbody = document.querySelector('table[data-view="eslintIndustry"] tbody');
-  if (tbody) {
-    tbody.innerHTML = rows;
-  } else {
-    console.warn('ESLint-Industry <tbody> not found – skipping update.');
+    // Update table
+    const tbodyES = document.querySelector('table[data-view="eslintIndustry"] tbody');
+    if (tbodyES) tbodyES.innerHTML = rows;
+    else console.warn('ESLint-Industry <tbody> not found.');
+
+    // Stop spinner
+    const spES = document.querySelector('.card[data-view="eslintIndustry"] .spinner');
+    if (spES) spES.classList.remove('spin');
+    else console.warn('ESLint-Industry spinner not found.');
+
+    return;  // skip the rest
   }
 
-  // 3. Remove the spinner
-  const spinner = document.querySelector('.card[data-view="eslintIndustry"] .spinner');
-  if (spinner) {
-    spinner.classList.remove('spin');
-  } else {
-    console.warn('ESLint-Industry spinner not found.');
+  // ─── Process log updates ──────────────────────────────────────────────────
+  if (m.command === 'logUpdate') {
+    const L   = m.payload || [];
+    const dot = document.getElementById('logStatus');
+    if (!dot) return;
+    const err = L.some(line => /\bERROR\b/i.test(line));
+    const wrn = !err && L.some(line => /\bWARN(?:ING)?\b/i.test(line));
+    dot.className = 'status-dot';
+    if (err) dot.classList.add('error');
+    else if (wrn) dot.classList.add('warning');
+    const out = document.getElementById('logOutput');
+    if (out) out.textContent = L.join('\n');
+    return;
   }
-
-  // ─── Prevent the generic updateData handler from wiping everything else ───
-  return;
-}
-
-
-			  
-			  
-// ─── Process log updates ──────────────────────────────────────────────────
-if (m.command === 'logUpdate') {
-  const L   = m.payload || [];
-  const dot = document.getElementById('logStatus');
-  if (!dot) return;                        // bail out if the status span isn’t there
-
-  const err = L.some(line => /\bERROR\b/i.test(line));
-  const wrn = !err && L.some(line => /\bWARN(?:ING)?\b/i.test(line));
-
-  dot.className = 'status-dot';
-  if (err)        dot.classList.add('error');
-  else if (wrn)   dot.classList.add('warning');
-
-  const out = document.getElementById('logOutput');
-  if (out) out.textContent = L.join('\n'); // similarly guard this if you clear it elsewhere
-  return;
-}
 
   // ─── Email send status ───────────────────────────────────────────────────
   if (m.command === 'emailStatus') {
@@ -728,217 +723,235 @@ if (m.command === 'logUpdate') {
     setLoading(false);
     const d = m.payload;
 
-
-		
-
-
+    // Helper to clear a table body safely
+    function clearBody(sel) {
+  const tb = document.querySelector(sel);
+  if (tb) {
+    tb.innerHTML = '';
+    return tb;
+  }
+  // silently skip if that table isn't in the current view
+  return null;
+}
     // --- Outdated Packages ---
-  
-const outTb = document.querySelector('#outdatedTable tbody');
-outTb.innerHTML = '';
-Object.entries(d.outdated || {}).forEach(([pkg, info]) => {
-  const r = outTb.insertRow();
-  r.innerHTML = `
-    <td><span class="status ${info.status}"></span></td>
-    <td>${pkg}</td>
-    <td>${info.current}</td>
-    <td>${info.latest}</td>
-    <td>
-      <button class="update-btn" data-pkg="${pkg}">
-        <span class="btn-text">Update</span>
-        <span class="btn-spinner spinner">⏳</span>
-      </button>
-    </td>
-  `;
-});
-
-// after rendering rows, wire up all Update buttons:
-document.querySelectorAll('#outdatedTable .update-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const textEl    = btn.querySelector('.btn-text');
-    const spinnerEl = btn.querySelector('.btn-spinner');
-
-    // disable and show spinner
-    btn.disabled = true;
-    textEl.style.display = 'none';
-    spinnerEl.classList.add('spin');
-
-    // send to extension
-    const pkg = btn.dataset.pkg;
-    vscode.postMessage({ command: 'updatePackage', pkg });
-  });
-});
-
-    // --- Vulnerabilities ---
-    const vulTb = document.querySelector('#vulnTable tbody');
-    vulTb.innerHTML = '';
-    if (d.vulnError) {
-      const r = vulTb.insertRow();
-      r.innerHTML = `<td colspan="3" style="color:tomato;">${d.vulnError}</td>`;
-    } else {
-      Object.entries(d.vuln || {}).forEach(([pkg, list]) => {
-        list.forEach(v => {
-          const r = vulTb.insertRow();
-          r.innerHTML = `<td>${pkg}</td><td>${v.severity}</td><td>${v.title}</td>`;
-        });
+    const outTb = clearBody('#outdatedTable tbody');
+    if (outTb) {
+      Object.entries(d.outdated || {}).forEach(([pkg, info]) => {
+        const r = outTb.insertRow();
+        r.innerHTML = `
+          <td><span class="status ${info.status}"></span></td>
+          <td>${pkg}</td>
+          <td>${info.current}</td>
+          <td>${info.latest}</td>
+          <td>
+            <button class="update-btn" data-pkg="${pkg}">
+              <span class="btn-text">Update</span>
+              <span class="btn-spinner spinner">⏳</span>
+            </button>
+          </td>`;
       });
     }
 
+    // --- Vulnerabilities ---
+    const vulTb = clearBody('#vulnTable tbody');
+    if (vulTb) {
+      if (d.vulnError) {
+        const r = vulTb.insertRow();
+        r.innerHTML = `<td colspan="3" style="color:tomato">${d.vulnError}</td>`;
+      } else {
+        Object.entries(d.vuln || {}).forEach(([pkg, list]) => {
+          list.forEach(v => {
+            const r = vulTb.insertRow();
+            r.innerHTML = `<td>${pkg}</td><td>${v.severity}</td><td>${v.title}</td>`;
+          });
+        });
+      }
+    }
+
     // --- Forbidden Licenses ---
-    const licTb = document.querySelector('#licenseTable tbody');
-    licTb.innerHTML = '';
-    (d.licenseIssues || []).forEach(x => {
-      const r = licTb.insertRow();
-      r.innerHTML = `<td>${x.pkg}</td><td>${x.licenses.join(', ')}</td>`;
-    });
+    const licTb = clearBody('#licenseTable tbody');
+    if (licTb) {
+      (d.licenseIssues || []).forEach(x => {
+        const r = licTb.insertRow();
+        r.innerHTML = `<td>${x.pkg}</td><td>${x.licenses.join(', ')}</td>`;
+      });
+    }
 
     // --- ESLint Issues ---
-    const esTb = document.querySelector('#eslintTable tbody');
-    esTb.innerHTML = '';
-    (d.eslintDetails || []).forEach(e2 => {
-      const r = esTb.insertRow();
-      r.innerHTML = `
-        <td>${e2.file}</td>
-        <td>${e2.line}</td>
-        <td>${e2.rule}</td>
-        <td>${e2.message}</td>
-      `;
-    });
+    const esTb = clearBody('#eslintTable tbody');
+    if (esTb) {
+      (d.eslintDetails || []).forEach(e2 => {
+        const r = esTb.insertRow();
+        r.innerHTML = `
+          <td>${e2.file}</td>
+          <td>${e2.line}</td>
+          <td>${e2.rule}</td>
+          <td>${e2.message}</td>`;
+      });
+    }
 
     // --- Duplication ---
-    const dupTb = document.querySelector('#dupTable tbody');
-    dupTb.innerHTML = '';
-    (d.duplicationDetails || []).forEach(dd => {
-      const r = dupTb.insertRow();
-      r.innerHTML = `
-        <td>${dd.fileA}</td>
-        <td>${dd.lineA}</td>
-        <td>${dd.fileB}</td>
-        <td>${dd.lineB}</td>
-      `;
-    });
-
-    // --- Complexity Chart ---
-    const compData = d.complexity || [];
-    const labels   = compData.map(c => c.path.split(/[\\/]/).pop());
-    const cyclo    = compData.map(c => c.aggregate.cyclomatic);
-    const sloc     = compData.map(c => c.aggregate.sloc);
-    const maint    = compData.map(c => c.aggregate.maintainability);
-    const ctx1     = document.getElementById('complexityChart').getContext('2d');
-    complexityChart?.destroy();
-    complexityChart = new Chart(ctx1, {
-      type: 'bar',
-      data: { labels, datasets: [
-        { label: 'Cyclomatic',    data: cyclo },
-        { label: 'SLOC',          data: sloc  },
-        { label: 'Maintainability', data: maint }
-      ]},
-      options: { /* your existing options… */ }
-    });
-
-    // --- Secrets ---
-    const secTb = document.querySelector('#secretTable tbody');
-    secTb.innerHTML = '';
-    (d.secrets || []).forEach(s => {
-      const r = secTb.insertRow();
-      r.innerHTML = `
-        <td>${s.file}</td>
-        <td>${s.line}</td>
-        <td>${s.rule}</td>
-        <td>${s.match}</td>
-      `;
-    });
-
-// --- Dependency Graph ---
-const declared = d.declared || [];              // ["express","lodash",…]
-const graph    = d.depGraph || {};              // { express: {version:"4.18.2"}, … }
-
-// ── Choose which packages to show ──────────────────────────────────────────────
-// Option A: only those declared in package.json
-const dgLabels = Object.keys(graph).filter(name =>
-  declared.includes(name)
-);
-
-// Option B: everything in the lockfile graph
-// const dgLabels = Object.keys(graph);
-
-// ── Short names (if your keys are full paths, strip them; otherwise this is identity) ──
-const dgShort = dgLabels.map(full =>
-  full.includes('/') || full.includes('\\')
-    ? full.split(/[\\/]/).pop()
-    : full
-);
-
-// ── Major‐version numbers ───────────────────────────────────────────────────────
-const dgValues = dgLabels.map(name => {
-  const ver = (graph[name].version || '0.0.0').split('.');
-  return parseInt(ver[0], 10) || 0;
-});
-
-// ── Render the chart ────────────────────────────────────────────────────────────
-const ctx = document.getElementById('dep-graph').getContext('2d');
-depChart?.destroy();
-depChart = new Chart(ctx, {
-  type: 'bar',
-  data: {
-    labels: dgShort,
-    datasets: [{
-      label: 'Version (major)',
-      data: dgValues,
-      // you can add styling here if you like
-    }]
-  },
-  options: {
-    responsive: true,
-    plugins: {
-      legend: { position: 'top' },
-      title: { display: true, text: 'Dependency Major Versions' }
-    },
-    scales: {
-      y: { beginAtZero: true, title: { display: true, text: 'Major Version' } },
-      x: { title: { display: true, text: 'Package' } }
+    const dupTb = clearBody('#dupTable tbody');
+    if (dupTb) {
+      (d.duplicationDetails || []).forEach(dd => {
+        const r = dupTb.insertRow();
+        r.innerHTML = `
+          <td>${dd.fileA}</td>
+          <td>${dd.lineA}</td>
+          <td>${dd.fileB}</td>
+          <td>${dd.lineB}</td>`;
+      });
     }
-  }
-});
 
-    // --- Sonar Report ---
-    const outEl = document.getElementById('sonarOutput');
-    const metEl = document.getElementById('sonarMetrics');
-    if (d.sonarResult) {
-      outEl.textContent = d.sonarResult.summary || '—';
-      const s = d.sonarResult.metrics || {};
-      metEl.innerHTML = `
-        <div class="card"><div class="card-title">🐞 Bugs</div><div class="card-value">${s.bugs               ?? 0}</div></div>
-        <div class="card"><div class="card-title">🔒 Vulnerabilities</div><div class="card-value">${s.vulnerabilities    ?? 0}</div></div>
-        <div class="card"><div class="card-title">🛠 Code Smells</div><div class="card-value">${s.code_smells        ?? 0}</div></div>
-		  <div class="card"><div class="card-title">🧪 Coverage</div><div class="card-value">${s.coverage       ?? '—'}</div></div>
-        <div class="card"><div class="card-title">🔁 Duplication %</div><div class="card-value">${s.duplicated_lines_density ?? '—'}</div></div>
-      `;
+  // --- Complexity Chart (raw values) ---
+    console.log('🏷️  Running Complexity Chart block');
+    const compData = Array.isArray(d.complexity) ? d.complexity : [];
+    const labels = compData.map(c => c.path.split(/[\\/]/).pop());
+    const cyclo  = compData.map(c => c.aggregate.cyclomatic    ?? 0);
+    const sloc   = compData.map(c => c.aggregate.sloc            ?? 0);
+    const maint  = compData.map(c => c.aggregate.maintainability ?? 0);
+
+    console.log('labels.length:', labels.length, { cyclo, sloc, maint });
+
+    const canvasEl = document.getElementById('complexityChart');
+    if (!canvasEl) {
+      console.error('⚠️ complexityChart not found — skipping complexity render');
+
     } else {
-      outEl.textContent = 'No Sonar data';
-      metEl.innerHTML = '';
+      if (window.complexityChart?.destroy) {
+        window.complexityChart.destroy();
+      }
+
+      window.complexityChart = new Chart(canvasEl.getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'Cyclomatic',
+              data: cyclo,
+              yAxisID: 'rawAxis',
+              backgroundColor: 'rgba(54,162,235,0.6)',
+            },
+            {
+              label: 'SLOC',
+              data: sloc,
+              yAxisID: 'rawAxis',
+              backgroundColor: 'rgba(255,99,132,0.6)',
+            },
+            {
+              label: 'Maintainability',
+              data: maint,
+              yAxisID: 'maintainAxis',
+              backgroundColor: 'rgba(255,159,64,0.6)',
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom' } },
+          scales: {
+            rawAxis: {
+              type: 'linear',
+              position: 'left',
+              beginAtZero: true,
+              title: { display: true, text: 'Cyclomatic & SLOC' }
+            },
+            maintainAxis: {
+              type: 'linear',
+              position: 'right',
+              beginAtZero: true,
+              grid: { drawOnChartArea: false },
+              title: { display: true, text: 'Maintainability Score' }
+            }
+          }
+        }
+      });
+
+      console.log('📊 Complexity chart rendered with', compData.length, 'entries');
     }
 
-    // --- Chat History (on full refresh) ---
-    (d.chatHistory || []).forEach(c3 => {
-      const time = c3.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      appendMessage(c3.from, c3.text, time);
+
+	
+// --- Dependency Graph (from extension.cjs key `depGraph`) ---
+  if (d.depGraph) {
+    console.log('🔍 depGraph payload:', d.depGraph);
+    const container = document.getElementById('depGraph');
+    container.innerHTML = '';
+    window.depCy && window.depCy.destroy();
+
+    // Build Cytoscape elements from the raw map of pkg → { dependencies: [...] }
+    const elements = [];
+    Object.entries(d.depGraph).forEach(([pkg, info]) => {
+      // ensure node for the package itself
+      elements.push({ data: { id: pkg } });
+      // for each dependency, add node + edge
+      (info.dependencies || []).forEach(dep => {
+        elements.push({ data: { id: dep } });
+        elements.push({ data: { source: pkg, target: dep } });
+      });
     });
 
+    window.depCy = cytoscape({
+      container,
+      elements,
+      layout: { name: 'cose', fit: true, padding: 20 },
+      style: [
+        { selector: 'node', style: { label: 'data(id)', 'text-valign': 'center',color: 'green'   } },
+        { selector: 'edge', style: { 'curve-style': 'bezier', 'target-arrow-shape': 'triangle' } }
+      ]
+    });
+    console.log('📈 DepGraph rendered with', elements.length, 'elements');
+  }
+    // --- Secrets ---
+    const secTb = clearBody('#secretTable tbody');
+    if (secTb) {
+      (d.secrets || []).forEach(s => {
+        const r = secTb.insertRow();
+        r.innerHTML = `
+          <td>${s.file}</td>
+          <td>${s.line}</td>
+          <td>${s.rule}</td>
+          <td>${s.match}</td>`;
+      });
+    }
+	
+// ─── Sonar Quality Report ─────────────────────────────────────
+const sonarOut   = document.getElementById('sonarOutput');
+const metricsCtr = document.getElementById('sonarMetrics');
+
+if (sonarOut) {
+  sonarOut.textContent = d.sonarResult?.summary || 'No summary available';
+}
+
+if (metricsCtr) {
+  metricsCtr.innerHTML = '';
+  Object.entries(d.sonarResult?.metrics || {}).forEach(([metric, value]) => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="card-title">${metric.replace(/_/g, ' ')}</div>
+      <div class="card-value">${value}</div>`;
+    metricsCtr.appendChild(card);
+  });
+}
+	
     // --- Suggested Fixes ---
-    const fixTb = document.querySelector('#fixTable tbody');
-    fixTb.innerHTML = '';
-    (d.suggestedFixes || []).forEach(f => {
-      const r = fixTb.insertRow();
-      r.innerHTML = `<td>${f.pkg}</td><td>${f.fix}</td>`;
-    });
+    const fixTb = clearBody('#fixTable tbody');
+    if (fixTb) {
+      (d.suggestedFixes || []).forEach(f => {
+        const r = fixTb.insertRow();
+        r.innerHTML = `<td>${f.pkg}</td><td>${f.fix}</td>`;
+      });
+    }
 
-    // --- Stop all spinners ---
-    document.querySelectorAll('.card .spinner.spin').forEach(sp => sp.classList.remove('spin'));
-	
-	
+    // Stop all spinners
+    document.querySelectorAll('.card .spinner.spin')
+            .forEach(sp => sp.classList.remove('spin'));
   }
 });
+
 
   window.onload = () => {
     // 1) replay whatever activation logs we buffered
