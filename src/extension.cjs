@@ -15,11 +15,19 @@ require('dotenv').config()
 const { Configuration, OpenAIApi } = require('openai');
 const fetch = require('node-fetch');
 const { Linter } = require("eslint");
+const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+const pkgJson   = require(path.join(workspaceRoot, 'package.json'));
+
+const declaredDeps = [
+  ...Object.keys(pkgJson.dependencies   || {}),
+  ...Object.keys(pkgJson.devDependencies||{})
+];
 
 // defaults to “all files”:
 let latestEslintScope = 'src';
 
-const HF_HUB_TOKEN = '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';
+const HF_HUB_TOKEN = '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';
 
 if (!HF_HUB_TOKEN) {
   console.warn('⚠️  HF_HUB_TOKEN is not set! Check your .env.');
@@ -940,40 +948,66 @@ async function runSecrets(signal) {
 }
 
 async function runDepGraph(signal) {
+  const fn = 'runDepGraph';
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
   if (!ws) {
     vscode.window.showErrorMessage('Open a workspace first');
     return;
   }
+
   outputChannel.show(true);
   if (signal.aborted) {
-    outputChannel.appendLine('runDepGraph: aborted before start');
+    outputChannel.appendLine(`${fn}: aborted before start`);
     return;
   }
-  outputChannel.appendLine('runDepGraph start');
+  outputChannel.appendLine(`${fn} start`);
+
   try {
+    // ─── 1️⃣ Read package.json ─────────────────────────────────────────────────
+    const pkgPath = path.join(ws, 'package.json');
+    let pkg = { dependencies: {}, devDependencies: {} };
+    try {
+      const raw = fs.readFileSync(pkgPath, 'utf8');
+      pkg = JSON.parse(raw);
+    } catch (e) {
+      logError(fn, e);
+      outputChannel.appendLine(`[${fn}] warning: could not read package.json`);
+    }
+    const declared = [
+      ...Object.keys(pkg.dependencies || {}),
+      ...Object.keys(pkg.devDependencies || {})
+    ];
+    outputChannel.appendLine(`[${fn}] declared deps: ${declared.length}`);
+
+    // ─── 2️⃣ Build depGraph from lockfile ────────────────────────────────────
     const depGraph = await checkDepGraph(ws, signal);
     if (signal.aborted) {
-      outputChannel.appendLine('runDepGraph: aborted before UI update');
+      outputChannel.appendLine(`${fn}: aborted before UI update`);
       return;
     }
-    latestPayload.depGraph = depGraph;
-    panel.webview.postMessage({ command: 'updateData', payload: latestPayload });
+    outputChannel.appendLine(`[${fn}] lockfile entries: ${Object.keys(depGraph).length}`);
+
+    // ─── 3️⃣ Post both arrays to the webview ─────────────────────────────────
+    latestPayload.declared  = declared;
+    latestPayload.depGraph  = depGraph;
+
+    panel.webview.postMessage({
+      command: 'updateData',
+      payload: latestPayload
+    });
+
   } catch (e) {
-    logError('runDepGraph', e);
-  
-  	 if (e.name === 'AbortError') {
-      outputChannel.appendLine('runDepGraph: aborted');
+    logError(fn, e);
+    if (e.name === 'AbortError') {
+      outputChannel.appendLine(`${fn}: aborted`);
     } else {
-      logError('runDepGraph', e);
+      outputChannel.appendLine(`[${fn}] failed — see console for details`);
     }
-
-  
-  
   }
-  outputChannel.appendLine('runDepGraph done');
-}
 
+  outputChannel.appendLine(`${fn} done`);
+}
 async function runFixes(signal) {
   const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!ws) {
