@@ -1102,43 +1102,82 @@ async function checkDepGraph(ws, signal) {
   if (signal.aborted) return {};
   outputChannel.appendLine('[DepGraph] start');
 
-  const npmLock  = path.join(ws, 'package-lock.json');
-  const yarnLock = path.join(ws, 'yarn.lock');
-  let graph = {};
+  const npmLockPath  = path.join(ws, 'package-lock.json');
+  const yarnLockPath = path.join(ws, 'yarn.lock');
+  const pkgJsonPath  = path.join(ws, 'package.json');
+  const graph        = {};
+
+  // Load top-level dependencies from package.json (only dependencies)
+  let topDeps = [];
+  if (fs.existsSync(pkgJsonPath)) {
+    try {
+      const pkgRaw = fs.readFileSync(pkgJsonPath, 'utf8');
+      const pkgData = JSON.parse(pkgRaw);
+      topDeps = Object.keys(pkgData.dependencies || {});
+    } catch (e) {
+      logError(fn, e);
+      outputChannel.appendLine('[DepGraph] warning — failed to parse package.json');
+    }
+  } else {
+    outputChannel.appendLine('[DepGraph] warning — package.json not found');
+  }
 
   try {
     if (signal.aborted) return graph;
-    if (fs.existsSync(npmLock)) {
-      const lockRaw  = fs.readFileSync(npmLock, 'utf8');
+
+    if (fs.existsSync(npmLockPath)) {
+      // npm v7+ or v6 format
+      const lockRaw  = fs.readFileSync(npmLockPath, 'utf8');
       const lockData = JSON.parse(lockRaw);
-      if (lockData.packages) {
-        for (const [pkgPath, info] of Object.entries(lockData.packages)) {
-          if (signal.aborted) break;
-          if (pkgPath === '') continue;
-          const name = info.name || pkgPath.split('node_modules/').pop();
-          graph[name] = { version: info.version };
-        }
-      } else if (lockData.dependencies) {
-        graph = flattenDeps(lockData);
+
+      const entries = lockData.packages
+        ? Object.entries(lockData.packages)
+        : Object.entries(lockData.dependencies || {});
+
+      for (const [pkgPath, info] of entries) {
+        if (signal.aborted) break;
+        const name = info.name || pkgPath.split('node_modules/').pop();
+        if (!topDeps.includes(name)) continue;
+
+        graph[name] = {
+          dependencies: info.dependencies
+            ? Object.keys(info.dependencies)
+            : []
+        };
       }
-      if (!signal.aborted) outputChannel.appendLine(`[DepGraph] npm entries: ${Object.keys(graph).length}`);
-    } else if (fs.existsSync(yarnLock)) {
-      const raw    = fs.readFileSync(yarnLock, 'utf8');
+
+      outputChannel.appendLine(
+        `[DepGraph] npm entries: ${Object.keys(graph).length}`
+      );
+
+    } else if (fs.existsSync(yarnLockPath)) {
+      // Yarn classic
+      const raw    = fs.readFileSync(yarnLockPath, 'utf8');
       const parsed = parseYarnLock(raw);
       if (parsed.type === 'success') {
         for (const key of Object.keys(parsed.object)) {
           if (signal.aborted) break;
+          const pkg = key.replace(/@[^@]+$/, '');
+          if (!topDeps.includes(pkg)) continue;
+
           const info = parsed.object[key];
-          const pkg  = key.replace(/@[^@]+$/, '');
-          graph[pkg] = { version: info.version };
+          graph[pkg] = {
+            dependencies: info.dependencies
+              ? Object.keys(info.dependencies)
+              : []
+          };
         }
-        if (!signal.aborted) outputChannel.appendLine(`[DepGraph] yarn entries: ${Object.keys(graph).length}`);
+        outputChannel.appendLine(
+          `[DepGraph] yarn entries: ${Object.keys(graph).length}`
+        );
       } else {
         outputChannel.appendLine('[DepGraph] failed — invalid yarn.lock');
       }
+
     } else {
       outputChannel.appendLine('[DepGraph] skipped — no lockfile found');
     }
+
   } catch (e) {
     logError(fn, e);
     outputChannel.appendLine('[DepGraph] failed — could not parse lockfile');
@@ -1147,7 +1186,6 @@ async function checkDepGraph(ws, signal) {
   if (!signal.aborted) outputChannel.appendLine('[DepGraph] done');
   return graph;
 }
-
 
 
 function flattenDeps(tree, acc = {}) {
@@ -1502,36 +1540,67 @@ async function checkSonar(ws, signal) {
 module.exports = { checkSonar };
 
 
-
-
 async function checkComplexity(ws, signal) {
   const fn = 'checkComplexity';
   if (signal.aborted) return [];
   outputChannel.appendLine('[Complexity] start');
-  const tool = resolveCmd(ws,'plato');
-  if (!tool) { outputChannel.appendLine('[Complexity] done'); return []; }
-  const reportDir = path.join(ws,'report','plato'); fs.mkdirSync(reportDir,{recursive:true});
 
-  let results=[];
+  const tool = resolveCmd(ws, 'plato');
+  if (!tool) {
+    outputChannel.appendLine('[Complexity] Plato tool not found. Skipping.');
+    return [];
+  }
+
+  const reportDir = path.join(ws, 'report', 'plato');
+  fs.mkdirSync(reportDir, { recursive: true });
+
+  let results = [];
   try {
-    await execP(`"${tool}" -r -d "${reportDir}" src`,{cwd:ws,signal,maxBuffer:209715200});
+    // Run Plato to generate report.json
+    await execP(
+      `"${tool}" -r -d "${reportDir}" src`,
+      { cwd: ws, signal, maxBuffer: 209715200 }
+    );
     if (signal.aborted) return [];
-    const reportFile = path.join(reportDir,'report.json');
+
+    const reportFile = path.join(reportDir, 'report.json');
     if (fs.existsSync(reportFile)) {
-      const raw = fs.readFileSync(reportFile,'utf8');
+      const raw = fs.readFileSync(reportFile, 'utf8');
       const data = JSON.parse(raw);
-      const reports = Array.isArray(data.reports)? data.reports : [];
-      results = reports.map(r=>{
-        const comp = r.complexity||{};
-        const sloc = comp.sloc||{};
-        const logical = typeof sloc.logical==='number'? sloc.logical: typeof sloc.physical==='number'? sloc.physical:0;
-        return { path: path.relative(ws,r.info.file||''), aggregate:{cyclomatic:comp.cyclomatic||0,sloc:logical,maintainability:comp.maintainability||0} };
+      const reports = Array.isArray(data.reports) ? data.reports : [];
+
+      results = reports.map(r => {
+        const ma = r.complexity?.methodAggregate || {};
+        const slocInfo = ma.sloc || {};
+        const logical = typeof slocInfo.logical === 'number'
+          ? slocInfo.logical
+          : typeof slocInfo.physical === 'number'
+            ? slocInfo.physical
+            : 0;
+
+        return {
+          path: path.relative(ws, r.info?.file || ''),
+          aggregate: {
+            cyclomatic: ma.cyclomatic || 0,
+            sloc: logical,
+            maintainability: typeof r.complexity?.maintainability === 'number'
+              ? r.complexity.maintainability
+              : 0
+          }
+        };
       });
     }
-  } catch(e) { logError(fn,e); }
+  } catch (e) {
+    logError(fn, e);
+  }
+
   if (!signal.aborted) outputChannel.appendLine('[Complexity] done');
   return results;
 }
+
+
+
+
 
 async function checkDuplication(ws, signal, threshold = 3) {
   const fn = 'checkDuplication';
