@@ -733,24 +733,69 @@ window.addEventListener('message', e => {
   // silently skip if that table isn't in the current view
   return null;
 }
-    // --- Outdated Packages ---
-    const outTb = clearBody('#outdatedTable tbody');
-    if (outTb) {
-      Object.entries(d.outdated || {}).forEach(([pkg, info]) => {
-        const r = outTb.insertRow();
-        r.innerHTML = `
-          <td><span class="status ${info.status}"></span></td>
-          <td>${pkg}</td>
-          <td>${info.current}</td>
-          <td>${info.latest}</td>
-          <td>
-            <button class="update-btn" data-pkg="${pkg}">
-              <span class="btn-text">Update</span>
-              <span class="btn-spinner spinner">⏳</span>
-            </button>
-          </td>`;
+// --- Outdated Packages ---
+const outTb = clearBody('#outdatedTable tbody');
+if (outTb) {
+  Object.entries(d.outdated || {}).forEach(([pkg, info]) => {
+    const r = outTb.insertRow();
+    r.innerHTML = `
+      <td><span class="status ${info.status}"></span></td>
+      <td>${pkg}</td>
+      <td>${info.current}</td>
+      <td>${info.latest}</td>
+      <td>
+        <button class="update-btn" data-pkg="${pkg}">
+          <span class="btn-text">Update</span>
+          <span class="btn-spinner spinner">⏳</span>
+        </button>
+      </td>`;
+  });
+
+  // ─── Wire up the Update buttons ─────────────────────────────────────────
+  outTb.querySelectorAll('.update-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pkg     = btn.dataset.pkg;
+      const spinner = btn.querySelector('.btn-spinner');
+      const textEl  = btn.querySelector('.btn-text');
+
+      // UI feedback
+      btn.disabled = true;
+      spinner.classList.add('spin');
+      textEl.textContent = 'Updating…';
+
+      // Send command to the extension
+      vscode.postMessage({
+        command: 'updatePackage',  // must match your extension's case exactly
+        pkg
       });
-    }
+    });
+  });
+}
+// ─── Handle a failed update ─────────────────────────────────────────────
+if (m.command === 'updateFailed') {
+  const { pkg, error } = m;
+  const btn = document.querySelector(`.update-btn[data-pkg="${pkg}"]`);
+  if (!btn) return;
+
+  const spinner = btn.querySelector('.btn-spinner');
+  const textEl  = btn.querySelector('.btn-text');
+  const row     = btn.closest('tr');
+
+  // revert the button
+  spinner.classList.remove('spin');
+  btn.disabled = false;
+  textEl.textContent = 'Update';
+
+  // show the error in a new cell
+  let errTd = row.querySelector('.update-error');
+  if (!errTd) {
+    errTd = document.createElement('td');
+    errTd.classList.add('update-error');
+    row.appendChild(errTd);
+  }
+  errTd.textContent = `❌ ${error}`;
+  return;
+}
 
     // --- Vulnerabilities ---
     const vulTb = clearBody('#vulnTable tbody');
